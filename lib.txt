@@ -3,6 +3,7 @@ lib/
 ├── firebase_options.dart
 ├── main.dart
 ├── models/
+│   ├── car.dart
 │   ├── coupon.dart
 │   ├── discount.dart
 │   ├── product.dart
@@ -22,6 +23,8 @@ lib/
 ├── views/
 │   ├── admin/
 │   │   ├── admin_home_screen.dart
+│   │   ├── car_management.dart
+│   │   ├── product_management.dart
 │   │   ├── reports_screen.dart
 │   │   ├── stock_management.dart
 │   │   └── users_screen.dart
@@ -173,6 +176,9 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:salesgo/firebase_options.dart';
+import 'package:salesgo/viewmodels/discount_vm.dart';
+import 'package:salesgo/viewmodels/sales_vm.dart';
+import 'package:salesgo/viewmodels/stock_vm.dart';
 import 'package:salesgo/views/admin/admin_home_screen.dart';
 import 'package:salesgo/views/admin/users_screen.dart';
 import 'package:salesgo/views/agent/agent_home_screen.dart';
@@ -187,14 +193,29 @@ import 'views/login_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.web,
-  ); 
+  try {
+    if (Firebase.apps.isEmpty) {
+      await Firebase.initializeApp(
+        options: DefaultFirebaseOptions.currentPlatform,
+      );
+    }
+  } catch (e) {
+    print('Firebase initialization error: $e');
+  }
   runApp(
     MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => AuthViewModel(authService: FirebaseAuthService())),
         Provider(create: (_) => FirestoreService()),
+        ChangeNotifierProvider(create: (context) => SalesViewModel(
+          firestoreService: context.read<FirestoreService>(),
+        )),
+        ChangeNotifierProvider(create: (context) => StockViewModel(
+          firestoreService: context.read<FirestoreService>(),
+        )),
+        ChangeNotifierProvider(create: (context) => DiscountViewModel(
+          firestoreService: context.read<FirestoreService>(),
+        )),
       ],
       child: const MyApp(),
     ),
@@ -257,6 +278,39 @@ final appRoutes = {
   '/reports': (context) => const ReportsScreen(),
 
 };
+
+models\car.dart:
+
+# models\car.dart
+class Car {
+  final String id;
+  final String name;
+  final String plateNumber;
+  final String? assignedAgentId;
+
+  Car({
+    required this.id,
+    required this.name,
+    required this.plateNumber,
+    this.assignedAgentId,
+  });
+
+  factory Car.fromFirestore(Map<String, dynamic> data) {
+    return Car(
+      id: data['id'],
+      name: data['name'],
+      plateNumber: data['plateNumber'],
+      assignedAgentId: data['assignedAgentId'],
+    );
+  }
+
+  Map<String, dynamic> toMap() => {
+    'id': id,
+    'name': name,
+    'plateNumber': plateNumber,
+    'assignedAgentId': assignedAgentId,
+  };
+}
 
 models\coupon.dart:
 
@@ -450,10 +504,10 @@ class AppUser {
 
   factory AppUser.fromFirestore(Map<String, dynamic> data) {
     return AppUser(
-      uid: data['uid'],
-      name: data['name'],
-      email: data['email'],
-      role: data['role'],
+      uid: data['uid'] ?? '',
+      name: data['name'] ?? 'Utilisateur inconnu',
+      email: data['email'] ?? '',
+      role: data['role'] ?? 'agent',
       assignedCarId: data['assignedCarId'],
     );
   }
@@ -483,7 +537,6 @@ class FirebaseAuthService implements AuthService {
         email: email,
         password: password,
       );
-      print(userCredential.user);
       // Return the User object from UserCredential
       return userCredential.user;
     } on FirebaseAuthException catch (e) {
@@ -541,6 +594,12 @@ class FirebaseAuthService implements AuthService {
 
   @override
   Stream<User?> get authStateChanges => _auth.authStateChanges();
+
+Future<void> resetPassword(String email) async {
+  await _auth.sendPasswordResetEmail(email: email);
+}
+
+
 }
 
 services\barcode_service.dart:
@@ -710,7 +769,7 @@ class AuthViewModel with ChangeNotifier {
             .get();
         
         if (!userDoc.exists) throw Exception('User document not found');
-        
+        if (userDoc.data() == null) {throw Exception("Les données utilisateur sont nulles !");}
         _currentUser = AppUser.fromFirestore(userDoc.data()!);
         _userRole = userDoc.data()!['role'];
       }
@@ -929,10 +988,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   if (_formKey.currentState!.validate()) {
                     try {
                       await authVM.signIn(_emailController.text, _passwordController.text);
-                      // If login is successful, the AuthViewModel should 
-                      // update the user role and trigger navigation.
                     } catch (e) {
-                      // Handle login errors (e.g., show a SnackBar)
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(content: Text('Login failed: $e')),
                       );
@@ -940,6 +996,17 @@ class _LoginScreenState extends State<LoginScreen> {
                   }
                 },
                 child: const Text('Login'),
+              ),
+              // Add this new section for signup
+              const SizedBox(height: 16),
+              TextButton(
+                onPressed: () {
+                  Navigator.pushNamed(context, '/signup');
+                },
+                style: TextButton.styleFrom(
+                  foregroundColor: Theme.of(context).primaryColor,
+                ),
+                child: const Text("Don't have an account? Sign up"),
               ),
             ],
           ),
@@ -1049,6 +1116,8 @@ views\admin\admin_home_screen.dart:
 # views\admin\admin_home_screen.dart
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:salesgo/views/admin/car_management.dart';
+import 'package:salesgo/views/admin/product_management.dart';
 import 'users_screen.dart';
 import 'stock_management.dart';
 import 'reports_screen.dart';
@@ -1066,6 +1135,8 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
 
   static const List<Widget> _adminScreens = [
     UsersScreen(),
+    ProductManagement(),
+    CarManagement(),
     StockManagement(),
     ReportsScreen(),
   ];
@@ -1096,10 +1167,19 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _selectedIndex,
         onTap: _onItemTapped,
+        type: BottomNavigationBarType.fixed, // Important for more than 3 items
         items: const [
           BottomNavigationBarItem(
             icon: Icon(Icons.people),
             label: 'Agents',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.shopping_bag),
+            label: 'Produits',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.directions_car),
+            label: 'Véhicules',
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.inventory),
@@ -1110,8 +1190,365 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
             label: 'Rapports',
           ),
         ],
+        selectedItemColor: Colors.blue, // Customize as needed
+        unselectedItemColor: Colors.grey, // Customize as needed
       ),
     );
+  }
+}
+
+views\admin\car_management.dart:
+
+# views\admin\car_management.dart
+import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:salesgo/models/car.dart';
+import 'package:salesgo/models/user.dart';
+
+class CarManagement extends StatefulWidget {
+  const CarManagement({super.key});
+
+  @override
+  _CarManagementState createState() => _CarManagementState();
+}
+
+class _CarManagementState extends State<CarManagement> {
+  final _formKey = GlobalKey<FormState>();
+  final _nameController = TextEditingController();
+  final _plateController = TextEditingController();
+  String? _selectedAgentId;
+
+  Future<void> _addCar() async {
+    if (_formKey.currentState!.validate()) {
+      try {
+        final car = Car(
+          id: FirebaseFirestore.instance.collection('cars').doc().id,
+          name: _nameController.text,
+          plateNumber: _plateController.text,
+          assignedAgentId: _selectedAgentId,
+        );
+
+        await FirebaseFirestore.instance
+            .collection('cars')
+            .doc(car.id)
+            .set(car.toMap());
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Car added successfully')),
+        );
+
+        // Clear form
+        _formKey.currentState!.reset();
+        setState(() => _selectedAgentId = null);
+      } catch (e) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error adding car: $e')),
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Car Management')),
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Form(
+          key: _formKey,
+          child: ListView(
+            children: [
+              TextFormField(
+                controller: _nameController,
+                decoration: const InputDecoration(labelText: 'Car Name'),
+                validator: (value) => value!.isEmpty ? 'Required' : null,
+              ),
+              TextFormField(
+                controller: _plateController,
+                decoration: const InputDecoration(labelText: 'Plate Number'),
+                validator: (value) => value!.isEmpty ? 'Required' : null,
+              ),
+              const SizedBox(height: 20),
+              const Text('Assign to Agent (optional)'),
+              StreamBuilder<QuerySnapshot>(
+                stream: FirebaseFirestore.instance
+                    .collection('users')
+                    .where('role', isEqualTo: 'agent')
+                    .snapshots(),
+                builder: (context, snapshot) {
+                  if (!snapshot.hasData) {
+                    return const CircularProgressIndicator();
+                  }
+                  final agents = snapshot.data!.docs
+                      .map((doc) => AppUser.fromFirestore(doc.data() as Map<String, dynamic>))
+                      .toList();
+                  
+                  return DropdownButton<String>(
+                    value: _selectedAgentId,
+                    hint: const Text('Select Agent'),
+                    items: agents.map((agent) {
+                      return DropdownMenuItem<String>(
+                        value: agent.uid,
+                        child: Text(agent.email),
+                      );
+                    }).toList(),
+                    onChanged: (value) => setState(() => _selectedAgentId = value),
+                  );
+                },
+              ),
+              const SizedBox(height: 20),
+              ElevatedButton(
+                onPressed: _addCar,
+                child: const Text('Add Car'),
+              ),
+              const SizedBox(height: 20),
+              const Divider(),
+              const Text('Existing Cars', style: TextStyle(fontSize: 18)),
+              const SizedBox(height: 10),
+              StreamBuilder<QuerySnapshot>(
+                stream: FirebaseFirestore.instance.collection('cars').snapshots(),
+                builder: (context, snapshot) {
+                  if (!snapshot.hasData) {
+                    return const CircularProgressIndicator();
+                  }
+                  return ListView.builder(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    itemCount: snapshot.data!.docs.length,
+                    itemBuilder: (context, index) {
+                      final doc = snapshot.data!.docs[index];
+                      final car = Car.fromFirestore(doc.data() as Map<String, dynamic>);
+                      return ListTile(
+                        title: Text(car.name),
+                        subtitle: Text('Plate: ${car.plateNumber}'),
+                        trailing: IconButton(
+                          icon: const Icon(Icons.delete),
+                          onPressed: () => _deleteCar(doc.id),
+                        ),
+                      );
+                    },
+                  );
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _deleteCar(String carId) async {
+    try {
+      await FirebaseFirestore.instance.collection('cars').doc(carId).delete();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Car deleted')),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error deleting car: $e')),
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _plateController.dispose();
+    super.dispose();
+  }
+}
+
+views\admin\product_management.dart:
+
+# views\admin\product_management.dart
+import 'dart:io';
+
+import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:salesgo/models/product.dart';
+
+class ProductManagement extends StatefulWidget {
+  const ProductManagement({super.key});
+
+  @override
+  _ProductManagementState createState() => _ProductManagementState();
+}
+
+class _ProductManagementState extends State<ProductManagement> {
+  final _formKey = GlobalKey<FormState>();
+  final _nameController = TextEditingController();
+  final _priceController = TextEditingController();
+  final _categoryController = TextEditingController();
+  final _barcodeController = TextEditingController();
+  String? _imageUrl;
+  bool _isLoading = false;
+
+  Future<void> _pickImage() async {
+    final picker = ImagePicker();
+    final pickedFile = await picker.pickImage(source: ImageSource.gallery);
+
+    if (pickedFile != null) {
+      setState(() => _isLoading = true);
+      try {
+        final ref = FirebaseStorage.instance
+            .ref()
+            .child('product_images/${DateTime.now().millisecondsSinceEpoch}');
+        
+        await ref.putFile(File(pickedFile.path));
+        _imageUrl = await ref.getDownloadURL();
+      } catch (e) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to upload image: $e')),
+        );
+      } finally {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  Future<void> _addProduct() async {
+    if (_formKey.currentState!.validate()) {
+      setState(() => _isLoading = true);
+      try {
+        final product = Product(
+          id: FirebaseFirestore.instance.collection('products').doc().id,
+          name: _nameController.text,
+          price: double.parse(_priceController.text),
+          category: _categoryController.text,
+          barcode: _barcodeController.text,
+          imageUrl: _imageUrl,
+        );
+
+        await FirebaseFirestore.instance
+            .collection('products')
+            .doc(product.id)
+            .set(product.toMap());
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Product added successfully')),
+        );
+
+        // Clear form
+        _formKey.currentState!.reset();
+        setState(() => _imageUrl = null);
+      } catch (e) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error adding product: $e')),
+        );
+      } finally {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Product Management')),
+      body: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Form(
+          key: _formKey,
+          child: ListView(
+            children: [
+              TextFormField(
+                controller: _nameController,
+                decoration: const InputDecoration(labelText: 'Product Name'),
+                validator: (value) => value!.isEmpty ? 'Required' : null,
+              ),
+              TextFormField(
+                controller: _priceController,
+                decoration: const InputDecoration(labelText: 'Price'),
+                keyboardType: TextInputType.number,
+                validator: (value) => value!.isEmpty ? 'Required' : null,
+              ),
+              TextFormField(
+                controller: _categoryController,
+                decoration: const InputDecoration(labelText: 'Category'),
+                validator: (value) => value!.isEmpty ? 'Required' : null,
+              ),
+              TextFormField(
+                controller: _barcodeController,
+                decoration: const InputDecoration(labelText: 'Barcode'),
+                validator: (value) => value!.isEmpty ? 'Required' : null,
+              ),
+              const SizedBox(height: 20),
+              _imageUrl != null
+                  ? Image.network(_imageUrl!, height: 150)
+                  : Container(),
+              ElevatedButton(
+                onPressed: _pickImage,
+                child: const Text('Upload Image'),
+              ),
+              const SizedBox(height: 20),
+              ElevatedButton(
+                onPressed: _isLoading ? null : _addProduct,
+                child: _isLoading
+                    ? const CircularProgressIndicator()
+                    : const Text('Add Product'),
+              ),
+              const SizedBox(height: 20),
+              const Divider(),
+              const Text('Existing Products', style: TextStyle(fontSize: 18)),
+              const SizedBox(height: 10),
+              StreamBuilder<QuerySnapshot>(
+                stream: FirebaseFirestore.instance
+                    .collection('products')
+                    .snapshots(),
+                builder: (context, snapshot) {
+                  if (!snapshot.hasData) {
+                    return const CircularProgressIndicator();
+                  }
+                  return ListView.builder(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    itemCount: snapshot.data!.docs.length,
+                    itemBuilder: (context, index) {
+                      final doc = snapshot.data!.docs[index];
+                      return ListTile(
+                        title: Text(doc['name']),
+                        subtitle: Text('€${doc['price']} - ${doc['category']}'),
+                        trailing: IconButton(
+                          icon: const Icon(Icons.delete),
+                          onPressed: () => _deleteProduct(doc.id),
+                        ),
+                      );
+                    },
+                  );
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _deleteProduct(String productId) async {
+    try {
+      await FirebaseFirestore.instance
+          .collection('products')
+          .doc(productId)
+          .delete();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Product deleted')),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error deleting product: $e')),
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _priceController.dispose();
+    _categoryController.dispose();
+    _barcodeController.dispose();
+    super.dispose();
   }
 }
 
@@ -1356,6 +1793,10 @@ views\agent\agent_home_screen.dart:
 
 # views\agent\agent_home_screen.dart
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:salesgo/viewmodels/auth_vm.dart';
+import 'package:salesgo/viewmodels/discount_vm.dart';
+import 'package:salesgo/viewmodels/stock_vm.dart';
 import 'sales_screen.dart';
 import 'stock_screen.dart';
 import 'history_screen.dart';
@@ -1369,6 +1810,25 @@ class AgentHomeScreen extends StatefulWidget {
 
 class _AgentHomeScreenState extends State<AgentHomeScreen> {
   int _selectedIndex = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    // Initialize viewmodels when screen loads
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final stockVM = context.read<StockViewModel>();
+      final discountVM = context.read<DiscountViewModel>();
+      final authVM = context.read<AuthViewModel>();
+      
+      // Load stock for the assigned car (if any)
+      if (authVM.currentUser?.assignedCarId != null) {
+        stockVM.loadStock(authVM.currentUser!.assignedCarId!);
+      }
+      
+      // Load active discounts
+      discountVM.loadActiveDiscounts();
+    });
+  }
 
   static const List<Widget> _agentScreens = [
     SalesScreen(),
@@ -1479,9 +1939,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
           DropdownButton<String>(
             value: _selectedFilter,
             items: const [
-              DropdownMenuItem(value: 'day', child: Text('Aujourd\'hui')),
-              DropdownMenuItem(value: 'week', child: Text('Cette semaine')),
-              DropdownMenuItem(value: 'month', child: Text('Ce mois')),
+              DropdownMenuItem(value: 'day', child: Text('Today')),
+              DropdownMenuItem(value: 'week', child: Text('Current Week')),
+              DropdownMenuItem(value: 'month', child: Text('Current Month')),
             ],
             onChanged: (value) {
               if (value != null) {
@@ -1540,7 +2000,6 @@ views\agent\sales_screen.dart:
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:provider/provider.dart';
-import 'package:salesgo/models/product.dart';
 import 'package:salesgo/services/firestore_service.dart';
 import 'package:salesgo/viewmodels/sales_vm.dart';
 import 'package:salesgo/widgets/product_details_card.dart';
