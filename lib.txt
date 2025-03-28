@@ -344,6 +344,8 @@ class Coupon {
 models\discount.dart:
 
 # models\discount.dart
+import 'package:cloud_firestore/cloud_firestore.dart';
+
 class Discount {
   final String id;
   final String category;
@@ -363,14 +365,23 @@ class Discount {
 
   factory Discount.fromFirestore(Map<String, dynamic> data) {
     return Discount(
-      id: data['id'],
-      category: data['category'],
-      startDate: data['startDate'].toDate(),
-      endDate: data['endDate'].toDate(),
-      value: data['value'].toDouble(),
-      type: data['type'],
+      id: data['id'] as String? ?? '', // Provide empty string as default
+      category: data['category'] as String? ?? 'general', // Default category
+      startDate: (data['startDate'] as Timestamp?)?.toDate() ?? DateTime.now(),
+      endDate: (data['endDate'] as Timestamp?)?.toDate() ?? DateTime.now().add(const Duration(days: 30)),
+      value: (data['value'] as num?)?.toDouble() ?? 0.0,
+      type: data['type'] as String? ?? 'percentage', // Default to percentage
     );
   }
+
+  Map<String, dynamic> toMap() => {
+    'id': id,
+    'category': category,
+    'startDate': startDate,
+    'endDate': endDate,
+    'value': value,
+    'type': type,
+  };
 }
 
 models\product.dart:
@@ -494,21 +505,23 @@ class AppUser {
   final String email;
   final String role;
   final String? assignedCarId;
+  final String name;
 
   AppUser({
     required this.uid,
     required this.email,
     required this.role,
-    this.assignedCarId, required String name,
+    this.assignedCarId,
+    required this.name,
   });
 
   factory AppUser.fromFirestore(Map<String, dynamic> data) {
     return AppUser(
       uid: data['uid'] ?? '',
-      name: data['name'] ?? 'Utilisateur inconnu',
       email: data['email'] ?? '',
       role: data['role'] ?? 'agent',
       assignedCarId: data['assignedCarId'],
+      name: data['name'] ?? 'Unknown',
     );
   }
 }
@@ -860,15 +873,14 @@ import 'package:uuid/uuid.dart';
 class SalesViewModel with ChangeNotifier {
   final List<Product> _cartItems = [];
   final FirestoreService _firestoreService;
+  final Uuid _uuid = const Uuid();
 
   SalesViewModel({required FirestoreService firestoreService})
       : _firestoreService = firestoreService;
 
-  List<Product> get cartItems => _cartItems;
+  List<Product> get cartItems => List.unmodifiable(_cartItems);
 
-  double get totalAmount {
-    return _cartItems.fold(0, (sum, item) => sum + item.price);
-  }
+  double get totalAmount => _calculateTotal();
 
   void addToCart(Product product) {
     _cartItems.add(product);
@@ -881,27 +893,41 @@ class SalesViewModel with ChangeNotifier {
       notifyListeners();
     }
   }
-  
+
   Future<void> confirmSale({
     required String paymentMethod,
+    required String agentId,
     String? couponCode,
   }) async {
-    final sale = Sale(
-      id: Uuid().v4(),
-      agentId: 'current_user_id', // Get from auth
-      date: DateTime.now(),
-      products: _cartItems,
-      totalAmount: _calculateTotal(),
-      paymentMethod: paymentMethod,
-    );
+    try {
+      if (_cartItems.isEmpty) {
+        throw Exception('Cannot confirm sale with empty cart');
+      }
 
-    await _firestoreService.recordSale(sale);
+      final sale = Sale(
+        id: _uuid.v4(),
+        agentId: agentId,
+        date: DateTime.now(),
+        products: List.unmodifiable(_cartItems),
+        totalAmount: totalAmount,
+        paymentMethod: paymentMethod,
+        couponCode: couponCode,
+      );
+
+      await _firestoreService.recordSale(sale);
+      clearCart();
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  void clearCart() {
     _cartItems.clear();
     notifyListeners();
   }
 
   double _calculateTotal() {
-    return _cartItems.fold(0, (sum, item) => sum + item.price);
+    return _cartItems.fold(0, (sum, item) => sum + (item.price ?? 0));
   }
 }
 
@@ -914,16 +940,26 @@ import '../services/firestore_service.dart';
 class StockViewModel with ChangeNotifier {
   final FirestoreService _firestoreService;
   Map<String, int> _stock = {};
+  bool _isLoading = false;
 
   StockViewModel({required FirestoreService firestoreService})
       : _firestoreService = firestoreService;
 
   Map<String, int> get stock => _stock;
+  bool get isLoading => _isLoading;
 
   void loadStock(String carId) {
+    _isLoading = true;
+    notifyListeners();
+    
     _firestoreService.getCarStock(carId).listen((stockData) {
       _stock = stockData;
+      _isLoading = false;
       notifyListeners();
+    }, onError: (error) {
+      _isLoading = false;
+      notifyListeners();
+      debugPrint('Error loading stock: $error');
     });
   }
 }
@@ -953,62 +989,93 @@ class _LoginScreenState extends State<LoginScreen> {
 
     return Scaffold(
       appBar: AppBar(title: const Text('Login')),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Form(
-          key: _formKey,
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: <Widget>[
-              TextFormField(
-                controller: _emailController,
-                decoration: const InputDecoration(labelText: 'Email'),
-                keyboardType: TextInputType.emailAddress,
-                validator: (value) {
-                  if (value == null || value.isEmpty) {
-                    return 'Please enter your email';
-                  }
-                  return null;
-                },
-              ),
-              TextFormField(
-                controller: _passwordController,
-                decoration: const InputDecoration(labelText: 'Password'),
-                obscureText: true,
-                validator: (value) {
-                  if (value == null || value.isEmpty) {
-                    return 'Please enter your password';
-                  }
-                  return null;
-                },
-              ),
-              const SizedBox(height: 24),
-              ElevatedButton(
-                onPressed: () async {
-                  if (_formKey.currentState!.validate()) {
-                    try {
-                      await authVM.signIn(_emailController.text, _passwordController.text);
-                    } catch (e) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('Login failed: $e')),
-                      );
-                    }
-                  }
-                },
-                child: const Text('Login'),
-              ),
-              // Add this new section for signup
-              const SizedBox(height: 16),
-              TextButton(
-                onPressed: () {
-                  Navigator.pushNamed(context, '/signup');
-                },
-                style: TextButton.styleFrom(
-                  foregroundColor: Theme.of(context).primaryColor,
+      body: Container(
+        decoration: const BoxDecoration(
+          image: DecorationImage(
+            image: AssetImage('assets/images/login.PNG'), // Updated to AssetImage
+            fit: BoxFit.cover,
+          ),
+        ),
+        child: Center(
+          child: Container(
+            padding: const EdgeInsets.all(16.0),
+            margin: const EdgeInsets.all(24.0),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.85),
+              borderRadius: BorderRadius.circular(16.0),
+            ),
+            child: SingleChildScrollView(
+              child: Form(
+                key: _formKey,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    const SizedBox(height: 20),
+                    const Icon(Icons.lock_person, size: 80, color: Colors.blue),
+                    const SizedBox(height: 30),
+                    TextFormField(
+                      controller: _emailController,
+                      decoration: const InputDecoration(
+                        labelText: 'Email',
+                        prefixIcon: Icon(Icons.email),
+                        border: OutlineInputBorder(),
+                      ),
+                      keyboardType: TextInputType.emailAddress,
+                      validator: (value) {
+                        if (value == null || value.isEmpty) {
+                          return 'Please enter your email';
+                        }
+                        return null;
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                    TextFormField(
+                      controller: _passwordController,
+                      decoration: const InputDecoration(
+                        labelText: 'Password',
+                        prefixIcon: Icon(Icons.lock),
+                        border: OutlineInputBorder(),
+                      ),
+                      obscureText: true,
+                      validator: (value) {
+                        if (value == null || value.isEmpty) {
+                          return 'Please enter your password';
+                        }
+                        return null;
+                      },
+                    ),
+                    const SizedBox(height: 24),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: () async {
+                          if (_formKey.currentState!.validate()) {
+                            try {
+                              await authVM.signIn(_emailController.text, _passwordController.text);
+                            } catch (e) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(content: Text('Login failed: $e')),
+                              );
+                            }
+                          }
+                        },
+                        child: const Text('Login'),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    TextButton(
+                      onPressed: () {
+                        Navigator.pushNamed(context, '/signup');
+                      },
+                      style: TextButton.styleFrom(
+                        foregroundColor: Theme.of(context).primaryColor,
+                      ),
+                      child: const Text("Don't have an account? Sign up"),
+                    ),
+                  ],
                 ),
-                child: const Text("Don't have an account? Sign up"),
               ),
-            ],
+            ),
           ),
         ),
       ),
@@ -1636,6 +1703,10 @@ views\admin\stock_management.dart:
 # views\admin\stock_management.dart
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
+import '../../viewmodels/auth_vm.dart';
+import '../../models/product.dart';
 
 class StockManagement extends StatefulWidget {
   const StockManagement({super.key});
@@ -1649,87 +1720,319 @@ class _StockManagementState extends State<StockManagement> {
   final _formKey = GlobalKey<FormState>();
   final _productController = TextEditingController();
   final _quantityController = TextEditingController();
+  List<Map<String, dynamic>> _products = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadProducts();
+  }
+
+  Future<void> _loadProducts() async {
+    final snapshot = await FirebaseFirestore.instance.collection('products').get();
+    setState(() {
+      _products = snapshot.docs.map((doc) {
+        final data = doc.data();
+        return {
+          'id': doc.id,
+          'name': data['name'] ?? 'Unknown Product',
+          'category': data['category'] ?? '',
+        };
+      }).toList();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
+    final authVM = Provider.of<AuthViewModel>(context, listen: false);
+
     return Scaffold(
-      appBar: AppBar(title: const Text('Gestion des Stocks')),
+      appBar: AppBar(title: const Text('Stock Management')),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Column(
           children: [
+            // Car Selection Dropdown
             StreamBuilder<QuerySnapshot>(
               stream: FirebaseFirestore.instance.collection('cars').snapshots(),
               builder: (context, snapshot) {
                 if (!snapshot.hasData) return const CircularProgressIndicator();
                 
-                return DropdownButton<String>(
+                return DropdownButtonFormField<String>(
                   value: _selectedCarId,
-                  hint: const Text('Sélectionner une voiture'),
+                  decoration: const InputDecoration(
+                    labelText: 'Select Car',
+                    border: OutlineInputBorder(),
+                  ),
                   items: snapshot.data!.docs.map((doc) {
+                    final car = doc.data() as Map<String, dynamic>;
                     return DropdownMenuItem<String>(
                       value: doc.id,
-                      child: Text(doc.id),
+                      child: Text('${car['name']} (${car['plateNumber']})'),
                     );
                   }).toList(),
                   onChanged: (value) => setState(() => _selectedCarId = value),
+                  validator: (value) => value == null ? 'Please select a car' : null,
                 );
               },
             ),
+            const SizedBox(height: 20),
+            
+            // Stock Assignment Form
             Form(
               key: _formKey,
               child: Column(
                 children: [
-                  TextFormField(
-                    controller: _productController,
-                    decoration: const InputDecoration(labelText: 'Produit ID'),
-                    validator: (value) => value!.isEmpty ? 'Requis' : null,
+                  Autocomplete<String>(
+                    optionsBuilder: (TextEditingValue textEditingValue) {
+                      if (textEditingValue.text.isEmpty) {
+                        return const Iterable<String>.empty();
+                      }
+                      return _products
+                          .where((product) => product['name']
+                              .toLowerCase()
+                              .contains(textEditingValue.text.toLowerCase()))
+                          .map((product) => product['id']);
+                    },
+                    onSelected: (String selection) {
+                      _productController.text = selection;
+                    },
+                    fieldViewBuilder: (
+                      BuildContext context,
+                      TextEditingController textEditingController,
+                      FocusNode focusNode,
+                      VoidCallback onFieldSubmitted,
+                    ) {
+                      return TextFormField(
+                        controller: textEditingController,
+                        focusNode: focusNode,
+                        decoration: const InputDecoration(
+                          labelText: 'Search Product',
+                          border: OutlineInputBorder(),
+                        ),
+                      );
+                    },
+                    optionsViewBuilder: (
+                      BuildContext context,
+                      AutocompleteOnSelected<String> onSelected,
+                      Iterable<String> options,
+                    ) {
+                      return Align(
+                        alignment: Alignment.topLeft,
+                        child: Material(
+                          elevation: 4.0,
+                          child: SizedBox(
+                            height: 200,
+                            child: ListView.builder(
+                              padding: EdgeInsets.zero,
+                              itemCount: options.length,
+                              itemBuilder: (BuildContext context, int index) {
+                                final option = options.elementAt(index);
+                                final product = _products.firstWhere(
+                                  (p) => p['id'] == option,
+                                  orElse: () => {'name': 'Unknown'},
+                                );
+                                return InkWell(
+                                  onTap: () {
+                                    onSelected(option);
+                                  },
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(16.0),
+                                    child: Text(product['name']),
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                        ),
+                      );
+                    },
                   ),
+                  const SizedBox(height: 16),
                   TextFormField(
                     controller: _quantityController,
                     keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(labelText: 'Quantité'),
-                    validator: (value) => value!.isEmpty ? 'Requis' : null,
+                    decoration: const InputDecoration(
+                      labelText: 'Quantity',
+                      border: OutlineInputBorder(),
+                    ),
+                    validator: (value) {
+                      if (value == null || value.isEmpty) {
+                        return 'Please enter quantity';
+                      }
+                      if (int.tryParse(value) == null) {
+                        return 'Please enter a valid number';
+                      }
+                      return null;
+                    },
                   ),
+                  const SizedBox(height: 20),
                   ElevatedButton(
-                    child: const Text('Assigner Stock'),
                     onPressed: _assignStock,
+                    style: ElevatedButton.styleFrom(
+                      minimumSize: const Size(double.infinity, 50),
+                    ),
+                    child: const Text('Assign Stock'),
                   ),
                 ],
               ),
             ),
+            const SizedBox(height: 20),
+            const Divider(),
+            
+            // Stock History Section (Admin Only)
+            if (authVM.userRole == 'admin')
+              Expanded(
+                child: Column(
+                  children: [
+                    const Text(
+                      'Stock History',
+                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 10),
+                    Expanded(
+                      child: StreamBuilder<QuerySnapshot>(
+                        stream: FirebaseFirestore.instance
+                            .collection('stockHistory')
+                            .orderBy('timestamp', descending: true)
+                            .snapshots(),
+                        builder: (context, snapshot) {
+                          if (!snapshot.hasData) {
+                            return const Center(child: CircularProgressIndicator());
+                          }
+                          
+                          return ListView.builder(
+                            itemCount: snapshot.data!.docs.length,
+                            itemBuilder: (context, index) {
+                              final doc = snapshot.data!.docs[index];
+                              final data = doc.data() as Map<String, dynamic>;
+                              
+                              return FutureBuilder(
+                                future: Future.wait([
+                                  FirebaseFirestore.instance
+                                      .collection('cars')
+                                      .doc(data['carId'])
+                                      .get(),
+                                  FirebaseFirestore.instance
+                                      .collection('products')
+                                      .doc(data['productId'])
+                                      .get(),
+                                  FirebaseFirestore.instance
+                                      .collection('users')
+                                      .doc(data['adminId'])
+                                      .get(),
+                                ]),
+                                builder: (context, AsyncSnapshot<List<DocumentSnapshot>> snapshot) {
+                                  if (!snapshot.hasData) {
+                                    return const ListTile(
+                                      title: Text('Loading...'),
+                                    );
+                                  }
+                                  
+                                  final car = snapshot.data![0].data() as Map<String, dynamic>? ?? {};
+                                  final product = snapshot.data![1].data() as Map<String, dynamic>? ?? {};
+                                  final admin = snapshot.data![2].data() as Map<String, dynamic>? ?? {};
+                                  
+                                  return Card(
+                                    margin: const EdgeInsets.symmetric(vertical: 4),
+                                    child: ListTile(
+                                      title: Text(product['name'] ?? 'Unknown Product'),
+                                      subtitle: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text('Car: ${car['name']} (${car['plateNumber']})'),
+                                          Text('Quantity: ${data['quantity']}'),
+                                          Text('Admin: ${admin['email']}'),
+                                        ],
+                                      ),
+                                      trailing: Text(
+                                        DateFormat('dd/MM/yy HH:mm').format(
+                                          (data['timestamp'] as Timestamp).toDate(),
+                                        ),
+                                      ),
+                                    ),
+                                  );
+                                },
+                              );
+                            },
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
           ],
         ),
       ),
     );
   }
 
-  void _assignStock() async {
+  Future<void> _assignStock() async {
     if (_selectedCarId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please select a car')));
+        const SnackBar(content: Text('Please select a car')),
+      );
       return;
     }
-    
+
     if (_formKey.currentState!.validate()) {
-      // Verify product exists
-      final productDoc = await FirebaseFirestore.instance
-          .collection('products')
-          .doc(_productController.text)
-          .get();
+      final productId = _productController.text;
+      final quantity = int.parse(_quantityController.text);
+      final authVM = Provider.of<AuthViewModel>(context, listen: false);
 
-      if (!productDoc.exists) {
+      try {
+        // Verify product exists
+        final productDoc = await FirebaseFirestore.instance
+            .collection('products')
+            .doc(productId)
+            .get();
+
+        if (!productDoc.exists) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Product does not exist')),
+          );
+          return;
+        }
+
+        // Update stock
+        await FirebaseFirestore.instance
+            .collection('cars/$_selectedCarId/stock')
+            .doc(productId)
+            .set({'quantity': quantity});
+
+        // Record history if admin
+        if (authVM.userRole == 'admin') {
+          await FirebaseFirestore.instance.collection('stockHistory').add({
+            'carId': _selectedCarId,
+            'productId': productId,
+            'quantity': quantity,
+            'timestamp': DateTime.now(),
+            'adminId': authVM.currentUser?.uid,
+          });
+        }
+
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Product does not exist')));
-        return;
-      }
+          const SnackBar(content: Text('Stock updated successfully')),
+        );
 
-      // Update stock
-      await FirebaseFirestore.instance
-          .collection('cars/$_selectedCarId/stock')
-          .doc(_productController.text)
-          .set({'quantity': int.parse(_quantityController.text)});
+        // Clear form
+        _productController.clear();
+        _quantityController.clear();
+        FocusScope.of(context).requestFocus(FocusNode());
+      } catch (e) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error updating stock: $e')),
+        );
+      }
     }
+  }
+
+  @override
+  void dispose() {
+    _productController.dispose();
+    _quantityController.dispose();
+    super.dispose();
   }
 }
 
@@ -2001,6 +2304,7 @@ import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:provider/provider.dart';
 import 'package:salesgo/services/firestore_service.dart';
+import 'package:salesgo/viewmodels/auth_vm.dart';
 import 'package:salesgo/viewmodels/sales_vm.dart';
 import 'package:salesgo/widgets/product_details_card.dart';
 import 'package:salesgo/widgets/payment_section.dart';
@@ -2016,6 +2320,7 @@ class _SalesScreenState extends State<SalesScreen> {
   final MobileScannerController _scannerController = MobileScannerController();
   final FirestoreService _firestoreService = FirestoreService();
   bool _isScanning = true;
+  bool _isProcessingPayment = false;
 
   @override
   void dispose() {
@@ -2026,38 +2331,49 @@ class _SalesScreenState extends State<SalesScreen> {
   @override
   Widget build(BuildContext context) {
     final salesVM = Provider.of<SalesViewModel>(context);
+    final authVM = Provider.of<AuthViewModel>(context, listen: false);
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('New Sale'),
         actions: [
           IconButton(
-            icon: Icon(_isScanning ? Icons.scanner : Icons.no_photography),
+            icon: Icon(_isScanning ? Icons.no_photography : Icons.qr_code_scanner),
             onPressed: _toggleScanning,
           ),
         ],
       ),
-      body: Column(
+      body: Stack(
         children: [
-          if (_isScanning) _buildScannerSection(context, salesVM),
-          Expanded(
-            child: ListView.builder(
-              itemCount: salesVM.cartItems.length,
-              itemBuilder: (context, index) => ProductDetailsCard(
-                product: salesVM.cartItems[index],
-                onRemove: () => salesVM.removeFromCart(index),
+          Column(
+            children: [
+              if (_isScanning) _buildScannerSection(context, salesVM),
+              Expanded(
+                child: ListView.builder(
+                  itemCount: salesVM.cartItems.length,
+                  itemBuilder: (context, index) => ProductDetailsCard(
+                    product: salesVM.cartItems[index],
+                    onRemove: () => salesVM.removeFromCart(index),
+                  ),
+                ),
               ),
-            ),
+              if (salesVM.cartItems.isNotEmpty)
+                PaymentSection(
+                  onConfirm: (method, coupon) => _handleSaleConfirmation(
+                    context,
+                    salesVM,
+                    authVM,
+                    method,
+                    coupon,
+                  ),
+                  totalAmount: salesVM.totalAmount,
+                  isProcessing: _isProcessingPayment,
+                ),
+            ],
           ),
-          if (salesVM.cartItems.isNotEmpty)
-            PaymentSection(
-              onConfirm: (method, coupon) => _handleSaleConfirmation(
-                context,
-                salesVM,
-                method,
-                coupon,
-              ),
-              totalAmount: salesVM.totalAmount,
+          if (_isProcessingPayment)
+            const Center(
+              child: CircularProgressIndicator(),
             ),
         ],
       ),
@@ -2116,22 +2432,45 @@ class _SalesScreenState extends State<SalesScreen> {
   Future<void> _handleSaleConfirmation(
     BuildContext context,
     SalesViewModel salesVM,
+    AuthViewModel authVM,
     String paymentMethod,
     String? couponCode,
   ) async {
+    if (authVM.currentUser == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('User not authenticated')),
+      );
+      return;
+    }
+
+    setState(() => _isProcessingPayment = true);
+
     try {
       await salesVM.confirmSale(
         paymentMethod: paymentMethod,
         couponCode: couponCode,
+        agentId: authVM.currentUser!.uid,
       );
+
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Sale completed successfully!')),
       );
-      Navigator.pop(context);
+
+      // Reset the screen after successful payment
+      _scannerController.start();
+      setState(() {
+        _isScanning = true;
+        _isProcessingPayment = false;
+      });
+      
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error completing sale: ${e.toString()}')),
       );
+    } finally {
+      if (mounted) {
+        setState(() => _isProcessingPayment = false);
+      }
     }
   }
 }
@@ -2140,25 +2479,129 @@ views\agent\stock_screen.dart:
 
 # views\agent\stock_screen.dart
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:provider/provider.dart';
 import '../../viewmodels/stock_vm.dart';
+import '../../models/product.dart';
+import '../../viewmodels/auth_vm.dart';
 
-class StockScreen extends StatelessWidget {
+class StockScreen extends StatefulWidget {
   const StockScreen({super.key});
+
+  @override
+  State<StockScreen> createState() => _StockScreenState();
+}
+
+class _StockScreenState extends State<StockScreen> {
+  @override
+  void initState() {
+    super.initState();
+    _loadData();
+  }
+
+  Future<void> _loadData() async {
+    final authVM = Provider.of<AuthViewModel>(context, listen: false);
+    final stockVM = Provider.of<StockViewModel>(context, listen: false);
+    
+    if (authVM.currentUser?.assignedCarId != null) {
+        stockVM.loadStock(authVM.currentUser!.assignedCarId!);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final stockVM = Provider.of<StockViewModel>(context);
-    
+    final authVM = Provider.of<AuthViewModel>(context);
+
     return Scaffold(
-      appBar: AppBar(title: const Text('Stock Actuel')),
-      body: ListView.builder(
+      appBar: AppBar(title: const Text('Current Stock')),
+      body: _buildBody(authVM, stockVM),
+    );
+  }
+
+  Widget _buildBody(AuthViewModel authVM, StockViewModel stockVM) {
+    // No user logged in
+    if (authVM.currentUser == null) {
+      return const Center(child: Text('Please log in'));
+    }
+
+    // No car assigned
+    if (authVM.currentUser!.assignedCarId == null) {
+      return Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Text('No car assigned to you'),
+          const SizedBox(height: 20),
+          ElevatedButton(
+            onPressed: _loadData,
+            child: const Text('Refresh'),
+          ),
+          const SizedBox(height: 20),
+          Text(
+            'Please contact your administrator to assign a vehicle',
+            style: Theme.of(context).textTheme.bodySmall,
+            textAlign: TextAlign.center,
+          ),
+        ],
+      );
+    }
+
+    // Loading state
+    if (stockVM.isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    // Empty stock
+    if (stockVM.stock.isEmpty) {
+      return Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Text('No stock available for your assigned vehicle'),
+          const SizedBox(height: 20),
+          ElevatedButton(
+            onPressed: _loadData,
+            child: const Text('Refresh'),
+          ),
+        ],
+      );
+    }
+
+    // Show stock list
+    return RefreshIndicator(
+      onRefresh: _loadData,
+      child: ListView.builder(
         itemCount: stockVM.stock.keys.length,
         itemBuilder: (context, index) {
           final productId = stockVM.stock.keys.elementAt(index);
-          return ListTile(
-            title: Text('Produit $productId'),
-            subtitle: Text('Quantité: ${stockVM.stock[productId]}'),
+          return FutureBuilder<DocumentSnapshot>(
+            future: FirebaseFirestore.instance
+                .collection('products')
+                .doc(productId)
+                .get(),
+            builder: (context, snapshot) {
+              if (!snapshot.hasData) {
+                return const ListTile(title: Text('Loading product...'));
+              }
+              final product = Product.fromFirestore(snapshot.data!);
+              return ListTile(
+                title: Text(product.name),
+                subtitle: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Quantity: ${stockVM.stock[productId]}'),
+                    if (product.barcode.isNotEmpty)
+                      Text('Barcode: ${product.barcode}',
+                        style: Theme.of(context).textTheme.bodySmall),
+                  ],
+                ),
+                trailing: Text('${product.price.toStringAsFixed(2)} €',
+                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                    fontWeight: FontWeight.bold,
+                    color: Theme.of(context).primaryColor,
+                  ),
+                ),
+              );
+            },
           );
         },
       ),
@@ -2210,12 +2653,14 @@ import 'package:flutter/material.dart';
 class PaymentSection extends StatefulWidget {
   final Function(String, String?) onConfirm;
   final double totalAmount;
+  final bool isProcessing;
 
   const PaymentSection({
-    super.key,
+    Key? key,
     required this.onConfirm,
     required this.totalAmount,
-  });
+    required this.isProcessing,
+  }) : super(key: key);
 
   @override
   State<PaymentSection> createState() => _PaymentSectionState();
@@ -2225,6 +2670,16 @@ class _PaymentSectionState extends State<PaymentSection> {
   String? _selectedPaymentMethod;
   final _couponController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
+  bool _isSubmitting = false;
+
+  @override
+  void didUpdateWidget(covariant PaymentSection oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Reset submitting state if parent widget changes processing state
+    if (oldWidget.isProcessing && !widget.isProcessing) {
+      _isSubmitting = false;
+    }
+  }
 
   @override
   void dispose() {
@@ -2236,78 +2691,116 @@ class _PaymentSectionState extends State<PaymentSection> {
   Widget build(BuildContext context) {
     return Card(
       margin: const EdgeInsets.all(16),
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Form(
-          key: _formKey,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                'Total: €${widget.totalAmount.toStringAsFixed(2)}',
-                style: const TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 20),
-              DropdownButtonFormField<String>(
-                decoration: const InputDecoration(
-                  labelText: 'Payment Method',
-                  border: OutlineInputBorder(),
-                ),
-                value: _selectedPaymentMethod,
-                items: const [
-                  DropdownMenuItem(
-                    value: 'cash',
-                    child: Text('Cash'),
+      child: AbsorbPointer(
+        absorbing: widget.isProcessing || _isSubmitting,
+        child: AnimatedOpacity(
+          opacity: (widget.isProcessing || _isSubmitting) ? 0.6 : 1.0,
+          duration: const Duration(milliseconds: 200),
+          child: Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Form(
+              key: _formKey,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    'Total: €${widget.totalAmount.toStringAsFixed(2)}',
+                    style: const TextStyle(
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
-                  DropdownMenuItem(
-                    value: 'card',
-                    child: Text('Credit Card'),
+                  const SizedBox(height: 20),
+                  DropdownButtonFormField<String>(
+                    decoration: InputDecoration(
+                      labelText: 'Payment Method*',
+                      border: const OutlineInputBorder(),
+                      filled: widget.isProcessing || _isSubmitting,
+                      fillColor: Colors.grey[100],
+                    ),
+                    value: _selectedPaymentMethod,
+                    items: const [
+                      DropdownMenuItem(
+                        value: 'cash',
+                        child: Text('Cash'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'card',
+                        child: Text('Credit Card'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'mobile',
+                        child: Text('Mobile Payment'),
+                      ),
+                    ],
+                    validator: (value) =>
+                        value == null ? 'Please select payment method' : null,
+                    onChanged: (value) {
+                      if (mounted) {
+                        setState(() {
+                          _selectedPaymentMethod = value;
+                        });
+                      }
+                    },
                   ),
-                  DropdownMenuItem(
-                    value: 'mobile',
-                    child: Text('Mobile Payment'),
+                  const SizedBox(height: 16),
+                  TextFormField(
+                    controller: _couponController,
+                    decoration: InputDecoration(
+                      labelText: 'Coupon Code (optional)',
+                      border: const OutlineInputBorder(),
+                      filled: widget.isProcessing || _isSubmitting,
+                      fillColor: Colors.grey[100],
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      backgroundColor: Theme.of(context).primaryColor,
+                    ),
+                    onPressed: _isSubmitting ? null : _handleConfirmation,
+                    child: _isSubmitting
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Text(
+                            'Confirm Sale',
+                            style: TextStyle(fontSize: 16),
+                          ),
                   ),
                 ],
-                validator: (value) =>
-                    value == null ? 'Please select payment method' : null,
-                onChanged: (value) {
-                  setState(() {
-                    _selectedPaymentMethod = value;
-                  });
-                },
               ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _couponController,
-                decoration: const InputDecoration(
-                  labelText: 'Coupon Code (optional)',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 24),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                ),
-                onPressed: _handleConfirmation,
-                child: const Text('Confirm Sale'),
-              ),
-            ],
+            ),
           ),
         ),
       ),
     );
   }
 
-  void _handleConfirmation() {
-    if (_formKey.currentState!.validate()) {
-      widget.onConfirm(
+  Future<void> _handleConfirmation() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    if (!mounted) return;
+
+    setState(() => _isSubmitting = true);
+
+    try {
+      await widget.onConfirm(
         _selectedPaymentMethod!,
-        _couponController.text.isNotEmpty ? _couponController.text : null,
+        _couponController.text.trim().isNotEmpty
+            ? _couponController.text.trim()
+            : null,
       );
+    } finally {
+      if (mounted) {
+        setState(() => _isSubmitting = false);
+      }
     }
   }
 }

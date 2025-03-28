@@ -7,15 +7,14 @@ import 'package:uuid/uuid.dart';
 class SalesViewModel with ChangeNotifier {
   final List<Product> _cartItems = [];
   final FirestoreService _firestoreService;
+  final Uuid _uuid = const Uuid();
 
   SalesViewModel({required FirestoreService firestoreService})
       : _firestoreService = firestoreService;
 
-  List<Product> get cartItems => _cartItems;
+  List<Product> get cartItems => List.unmodifiable(_cartItems);
 
-  double get totalAmount {
-    return _cartItems.fold(0, (sum, item) => sum + item.price);
-  }
+  double get totalAmount => _calculateTotal();
 
   void addToCart(Product product) {
     _cartItems.add(product);
@@ -28,26 +27,40 @@ class SalesViewModel with ChangeNotifier {
       notifyListeners();
     }
   }
-  
+
   Future<void> confirmSale({
     required String paymentMethod,
+    required String agentId,
     String? couponCode,
   }) async {
-    final sale = Sale(
-      id: Uuid().v4(),
-      agentId: 'current_user_id', // Get from auth
-      date: DateTime.now(),
-      products: _cartItems,
-      totalAmount: _calculateTotal(),
-      paymentMethod: paymentMethod,
-    );
+    try {
+      if (_cartItems.isEmpty) {
+        throw Exception('Cannot confirm sale with empty cart');
+      }
 
-    await _firestoreService.recordSale(sale);
+      final sale = Sale(
+        id: _uuid.v4(),
+        agentId: agentId,
+        date: DateTime.now(),
+        products: List.unmodifiable(_cartItems),
+        totalAmount: totalAmount,
+        paymentMethod: paymentMethod,
+        couponCode: couponCode,
+      );
+
+      await _firestoreService.recordSale(sale);
+      clearCart();
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  void clearCart() {
     _cartItems.clear();
     notifyListeners();
   }
 
   double _calculateTotal() {
-    return _cartItems.fold(0, (sum, item) => sum + item.price);
+    return _cartItems.fold(0, (sum, item) => sum + (item.price ?? 0));
   }
 }

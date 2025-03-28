@@ -1,3 +1,5 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+
 class Discount {
   final String id;
   final String category;
@@ -17,12 +19,21 @@ class Discount {
 
   factory Discount.fromFirestore(Map<String, dynamic> data) {
     return Discount(
-      id: data['id'],
-      category: data['category'],
-      startDate: data['startDate'].toDate(),
-      endDate: data['endDate'].toDate(),
-      value: data['value'].toDouble(),
-      type: data['type'],
+      id: data['id'] as String? ?? '', // Provide empty string as default
+      category: data['category'] as String? ?? 'general', // Default category
+      startDate: (data['startDate'] as Timestamp?)?.toDate() ?? DateTime.now(),
+      endDate: (data['endDate'] as Timestamp?)?.toDate() ?? DateTime.now().add(const Duration(days: 30)),
+      value: (data['value'] as num?)?.toDouble() ?? 0.0,
+      type: data['type'] as String? ?? 'percentage', // Default to percentage
     );
   }
+
+  Map<String, dynamic> toMap() => {
+    'id': id,
+    'category': category,
+    'startDate': startDate,
+    'endDate': endDate,
+    'value': value,
+    'type': type,
+  };
 }

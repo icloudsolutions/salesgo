@@ -3,21 +3,23 @@ class AppUser {
   final String email;
   final String role;
   final String? assignedCarId;
+  final String name;
 
   AppUser({
     required this.uid,
     required this.email,
     required this.role,
-    this.assignedCarId, required String name,
+    this.assignedCarId,
+    required this.name,
   });
 
   factory AppUser.fromFirestore(Map<String, dynamic> data) {
     return AppUser(
       uid: data['uid'] ?? '',
-      name: data['name'] ?? 'Utilisateur inconnu',
       email: data['email'] ?? '',
       role: data['role'] ?? 'agent',
       assignedCarId: data['assignedCarId'],
+      name: data['name'] ?? 'Unknown',
     );
   }
 }
