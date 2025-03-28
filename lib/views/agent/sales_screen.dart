@@ -33,7 +33,7 @@ class _SalesScreenState extends State<SalesScreen> {
         title: const Text('New Sale'),
         actions: [
           IconButton(
-            icon: Icon(_isScanning ? Icons.scanner : Icons.no_photography),
+            icon: Icon(_isScanning ? Icons.qr_code_scanner  : Icons.no_photography),
             onPressed: _toggleScanning,
           ),
         ],
