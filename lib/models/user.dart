@@ -22,4 +22,13 @@ class AppUser {
       name: data['name'] ?? 'Unknown',
     );
   }
+
+  Map<String, dynamic> toMap() => {
+    'uid': uid,
+    'email': email,
+    'role': role,
+    'assignedCarId': assignedCarId,
+    'name': name,
+  };
+
 }

@@ -81,5 +81,31 @@ class AuthViewModel with ChangeNotifier {
     }
     notifyListeners();
   }
-  
+
+  // Add this method to update the current user
+  Future<void> updateCurrentUser(AppUser? user) async {
+    _currentUser = user;
+    _userRole = user?.role;
+    notifyListeners();
+  }
+
+  // Add this method to refresh user data from Firestore
+  Future<void> refreshUserData() async {
+    if (_currentUser == null) return;
+    
+    try {
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(_currentUser!.uid)
+          .get();
+      
+      if (userDoc.exists) {
+        await updateCurrentUser(AppUser.fromFirestore(userDoc.data()!));
+      }
+    } catch (e) {
+      debugPrint('Error refreshing user data: $e');
+    }
+  }
+
+
 }
