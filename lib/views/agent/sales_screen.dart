@@ -34,7 +34,7 @@ class _SalesScreenState extends State<SalesScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('New Sale'),
+        title: const Text('Quick Sale'),
         actions: [
           IconButton(
             icon: Icon(_isScanning ? Icons.no_photography : Icons.qr_code_scanner),

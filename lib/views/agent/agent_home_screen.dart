@@ -49,7 +49,7 @@ class _AgentHomeScreenState extends State<AgentHomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Tableau de bord Agent')),
+      appBar: AppBar(title: const Text('Coach Mobile Dashboard')),
       body: _agentScreens.elementAt(_selectedIndex),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _selectedIndex,
@@ -57,7 +57,7 @@ class _AgentHomeScreenState extends State<AgentHomeScreen> {
         items: const [
           BottomNavigationBarItem(
             icon: Icon(Icons.point_of_sale),
-            label: 'Ventes',
+            label: 'Sales',
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.inventory_2),
@@ -65,7 +65,7 @@ class _AgentHomeScreenState extends State<AgentHomeScreen> {
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.history),
-            label: 'Historique',
+            label: 'History',
           ),
         ],
       ),

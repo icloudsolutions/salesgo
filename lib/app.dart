@@ -13,7 +13,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Ventes Porte-à-Porte',
+      title: 'Mobile SalesGo',
       theme: ThemeData(primarySwatch: Colors.blue),
       initialRoute: '/',
       routes: {
