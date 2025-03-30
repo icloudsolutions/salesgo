@@ -5,6 +5,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:salesgo/models/product.dart';
+import 'package:salesgo/models/discount.dart';
+import 'package:salesgo/models/category.dart';
 
 class ProductManagement extends StatefulWidget {
   const ProductManagement({super.key});
@@ -13,14 +15,46 @@ class ProductManagement extends StatefulWidget {
   _ProductManagementState createState() => _ProductManagementState();
 }
 
-class _ProductManagementState extends State<ProductManagement> {
+class _ProductManagementState extends State<ProductManagement> with SingleTickerProviderStateMixin {
+  late TabController _tabController;
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
   final _priceController = TextEditingController();
-  final _categoryController = TextEditingController();
+  String? _selectedProductCategory;
   final _barcodeController = TextEditingController();
   String? _imageUrl;
   bool _isLoading = false;
+
+  // For categories
+  final _categoryNameController = TextEditingController();
+  String? _categoryImageUrl;
+
+  // For discounts
+  final _discountNameController = TextEditingController();
+  final _discountValueController = TextEditingController();
+  final _discountTypeController = TextEditingController();
+  String? _selectedDiscountCategory;
+  DateTime? _discountStartDate;
+  DateTime? _discountEndDate;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 3, vsync: this);
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    _nameController.dispose();
+    _priceController.dispose();
+    _barcodeController.dispose();
+    _categoryNameController.dispose();
+    _discountNameController.dispose();
+    _discountValueController.dispose();
+    _discountTypeController.dispose();
+    super.dispose();
+  }
 
   Future<void> _pickImage() async {
     final picker = ImagePicker();
@@ -45,6 +79,29 @@ class _ProductManagementState extends State<ProductManagement> {
     }
   }
 
+  Future<void> _pickCategoryImage() async {
+    final picker = ImagePicker();
+    final pickedFile = await picker.pickImage(source: ImageSource.gallery);
+
+    if (pickedFile != null) {
+      setState(() => _isLoading = true);
+      try {
+        final ref = FirebaseStorage.instance
+            .ref()
+            .child('category_images/${DateTime.now().millisecondsSinceEpoch}');
+        
+        await ref.putFile(File(pickedFile.path));
+        _categoryImageUrl = await ref.getDownloadURL();
+      } catch (e) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to upload image: $e')),
+        );
+      } finally {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
   Future<void> _addProduct() async {
     if (_formKey.currentState!.validate()) {
       setState(() => _isLoading = true);
@@ -53,7 +110,7 @@ class _ProductManagementState extends State<ProductManagement> {
           id: FirebaseFirestore.instance.collection('products').doc().id,
           name: _nameController.text,
           price: double.parse(_priceController.text),
-          category: _categoryController.text,
+          category: _selectedProductCategory ?? '',
           barcode: _barcodeController.text,
           imageUrl: _imageUrl,
         );
@@ -69,7 +126,11 @@ class _ProductManagementState extends State<ProductManagement> {
 
         // Clear form
         _formKey.currentState!.reset();
-        setState(() => _imageUrl = null);
+        setState(() {
+          _imageUrl = null;
+          _selectedProductCategory = null;
+        });
+        Navigator.pop(context);
       } catch (e) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error adding product: $e')),
@@ -80,87 +141,204 @@ class _ProductManagementState extends State<ProductManagement> {
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Product Management')),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Form(
-          key: _formKey,
-          child: ListView(
-            children: [
-              TextFormField(
-                controller: _nameController,
-                decoration: const InputDecoration(labelText: 'Product Name'),
-                validator: (value) => value!.isEmpty ? 'Required' : null,
-              ),
-              TextFormField(
-                controller: _priceController,
-                decoration: const InputDecoration(labelText: 'Price'),
-                keyboardType: TextInputType.number,
-                validator: (value) => value!.isEmpty ? 'Required' : null,
-              ),
-              TextFormField(
-                controller: _categoryController,
-                decoration: const InputDecoration(labelText: 'Category'),
-                validator: (value) => value!.isEmpty ? 'Required' : null,
-              ),
-              TextFormField(
-                controller: _barcodeController,
-                decoration: const InputDecoration(labelText: 'Barcode'),
-                validator: (value) => value!.isEmpty ? 'Required' : null,
-              ),
-              const SizedBox(height: 20),
-              _imageUrl != null
-                  ? Image.network(_imageUrl!, height: 150)
-                  : Container(),
-              ElevatedButton(
-                onPressed: _pickImage,
-                child: const Text('Upload Image'),
-              ),
-              const SizedBox(height: 20),
-              ElevatedButton(
-                onPressed: _isLoading ? null : _addProduct,
-                child: _isLoading
-                    ? const CircularProgressIndicator()
-                    : const Text('Add Product'),
-              ),
-              const SizedBox(height: 20),
-              const Divider(),
-              const Text('Existing Products', style: TextStyle(fontSize: 18)),
-              const SizedBox(height: 10),
-              StreamBuilder<QuerySnapshot>(
-                stream: FirebaseFirestore.instance
-                    .collection('products')
-                    .snapshots(),
-                builder: (context, snapshot) {
-                  if (!snapshot.hasData) {
-                    return const CircularProgressIndicator();
-                  }
-                  return ListView.builder(
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    itemCount: snapshot.data!.docs.length,
-                    itemBuilder: (context, index) {
-                      final doc = snapshot.data!.docs[index];
-                      return ListTile(
-                        title: Text(doc['name']),
-                        subtitle: Text('€${doc['price']} - ${doc['category']}'),
-                        trailing: IconButton(
-                          icon: const Icon(Icons.delete),
-                          onPressed: () => _deleteProduct(doc.id),
-                        ),
-                      );
-                    },
-                  );
-                },
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
+  Future<void> _updateProduct(String productId) async {
+    if (_formKey.currentState!.validate()) {
+      setState(() => _isLoading = true);
+      try {
+        await FirebaseFirestore.instance
+            .collection('products')
+            .doc(productId)
+            .update({
+              'name': _nameController.text,
+              'price': double.parse(_priceController.text),
+              'category': _selectedProductCategory,
+              'barcode': _barcodeController.text,
+              'imageUrl': _imageUrl,
+            });
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Product updated successfully')),
+        );
+        Navigator.pop(context);
+      } catch (e) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error updating product: $e')),
+        );
+      } finally {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  Future<void> _addCategory() async {
+    if (_categoryNameController.text.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Category name is required')),
+      );
+      return;
+    }
+
+    setState(() => _isLoading = true);
+    try {
+      await FirebaseFirestore.instance.collection('categories').add({
+        'name': _categoryNameController.text,
+        'imageUrl': _categoryImageUrl,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Category added successfully')),
+      );
+
+      // Clear form
+      _categoryNameController.clear();
+      setState(() => _categoryImageUrl = null);
+      Navigator.pop(context);
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error adding category: $e')),
+      );
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _updateCategory(String categoryId) async {
+    if (_categoryNameController.text.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Category name is required')),
+      );
+      return;
+    }
+
+    setState(() => _isLoading = true);
+    try {
+      await FirebaseFirestore.instance
+          .collection('categories')
+          .doc(categoryId)
+          .update({
+            'name': _categoryNameController.text,
+            'imageUrl': _categoryImageUrl,
+          });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Category updated successfully')),
+      );
+      Navigator.pop(context);
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error updating category: $e')),
+      );
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _addDiscount() async {
+    if (_discountNameController.text.isEmpty ||
+        _discountValueController.text.isEmpty ||
+        _discountTypeController.text.isEmpty ||
+        _selectedDiscountCategory == null ||
+        _discountStartDate == null ||
+        _discountEndDate == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('All fields are required')),
+      );
+      return;
+    }
+
+    if (_discountEndDate!.isBefore(_discountStartDate!)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('End date must be after start date')),
+      );
+      return;
+    }
+
+    setState(() => _isLoading = true);
+    try {
+      final discount = Discount(
+        id: FirebaseFirestore.instance.collection('discounts').doc().id,
+        name: _discountNameController.text,
+        category: _selectedDiscountCategory!,
+        startDate: _discountStartDate!,
+        endDate: _discountEndDate!,
+        value: double.parse(_discountValueController.text),
+        type: _discountTypeController.text,
+      );
+
+      await FirebaseFirestore.instance
+          .collection('discounts')
+          .doc(discount.id)
+          .set(discount.toMap());
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Discount added successfully')),
+      );
+
+      // Clear form
+      _discountNameController.clear();
+      _discountValueController.clear();
+      _discountTypeController.clear();
+      setState(() {
+        _selectedDiscountCategory = null;
+        _discountStartDate = null;
+        _discountEndDate = null;
+      });
+      Navigator.pop(context);
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error adding discount: $e')),
+      );
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _updateDiscount(String discountId) async {
+    if (_discountNameController.text.isEmpty ||
+        _discountValueController.text.isEmpty ||
+        _discountTypeController.text.isEmpty ||
+        _selectedDiscountCategory == null ||
+        _discountStartDate == null ||
+        _discountEndDate == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('All fields are required')),
+      );
+      return;
+    }
+
+    if (_discountEndDate!.isBefore(_discountStartDate!)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('End date must be after start date')),
+      );
+      return;
+    }
+
+    setState(() => _isLoading = true);
+    try {
+      await FirebaseFirestore.instance
+          .collection('discounts')
+          .doc(discountId)
+          .update({
+            'name': _discountNameController.text,
+            'category': _selectedDiscountCategory,
+            'startDate': _discountStartDate,
+            'endDate': _discountEndDate,
+            'value': double.parse(_discountValueController.text),
+            'type': _discountTypeController.text,
+          });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Discount updated successfully')),
+      );
+      Navigator.pop(context);
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error updating discount: $e')),
+      );
+    } finally {
+      setState(() => _isLoading = false);
+    }
   }
 
   Future<void> _deleteProduct(String productId) async {
@@ -179,12 +357,496 @@ class _ProductManagementState extends State<ProductManagement> {
     }
   }
 
+  Future<void> _deleteCategory(String categoryId) async {
+    try {
+      await FirebaseFirestore.instance
+          .collection('categories')
+          .doc(categoryId)
+          .delete();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Category deleted')),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error deleting category: $e')),
+      );
+    }
+  }
+
+  Future<void> _deleteDiscount(String discountId) async {
+    try {
+      await FirebaseFirestore.instance
+          .collection('discounts')
+          .doc(discountId)
+          .delete();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Discount deleted')),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error deleting discount: $e')),
+      );
+    }
+  }
+
+  Future<void> _selectStartDate(BuildContext context) async {
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: DateTime.now(),
+      firstDate: DateTime.now(),
+      lastDate: DateTime(2101),
+    );
+    if (picked != null && picked != _discountStartDate) {
+      setState(() {
+        _discountStartDate = picked;
+      });
+    }
+  }
+
+  Future<void> _selectEndDate(BuildContext context) async {
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: _discountStartDate ?? DateTime.now(),
+      firstDate: _discountStartDate ?? DateTime.now(),
+      lastDate: DateTime(2101),
+    );
+    if (picked != null && picked != _discountEndDate) {
+      setState(() {
+        _discountEndDate = picked;
+      });
+    }
+  }
+
+  Future<void> _editProduct(Product product) async {
+    _nameController.text = product.name;
+    _priceController.text = product.price.toString();
+    _selectedProductCategory = product.category;
+    _barcodeController.text = product.barcode;
+    setState(() => _imageUrl = product.imageUrl);
+
+    await showDialog(
+      context: context,
+      builder: (context) => _buildProductForm(isEditing: true, productId: product.id),
+    );
+  }
+
+  Future<void> _editCategory(DocumentSnapshot category) async {
+    _categoryNameController.text = category['name'];
+    setState(() => _categoryImageUrl = category['imageUrl']);
+
+    await showDialog(
+      context: context,
+      builder: (context) => _buildCategoryForm(isEditing: true, categoryId: category.id),
+    );
+  }
+
+  Future<void> _editDiscount(DocumentSnapshot discount) async {
+    final data = discount.data() as Map<String, dynamic>;
+    _discountNameController.text = data['name'] ?? '';
+    _discountValueController.text = data['value'].toString();
+    _discountTypeController.text = data['type'];
+    _selectedDiscountCategory = data['category'];
+    _discountStartDate = (data['startDate'] as Timestamp).toDate();
+    _discountEndDate = (data['endDate'] as Timestamp).toDate();
+
+    await showDialog(
+      context: context,
+      builder: (context) => _buildDiscountForm(isEditing: true, discountId: discount.id),
+    );
+  }
+
   @override
-  void dispose() {
-    _nameController.dispose();
-    _priceController.dispose();
-    _categoryController.dispose();
-    _barcodeController.dispose();
-    super.dispose();
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Product Management'),
+        bottom: TabBar(
+          controller: _tabController,
+          tabs: const [
+            Tab(icon: Icon(Icons.shopping_bag), text: 'Products'),
+            Tab(icon: Icon(Icons.category), text: 'Categories'),
+            Tab(icon: Icon(Icons.discount), text: 'Discounts'),
+          ],
+        ),
+      ),
+      body: TabBarView(
+        controller: _tabController,
+        children: [
+          // Products Tab
+          _buildProductsTab(),
+          // Categories Tab
+          _buildCategoriesTab(),
+          // Discount & Loyalty Tab
+          _buildDiscountsTab(),
+        ],
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () {
+          switch (_tabController.index) {
+            case 0: // Products tab
+              _nameController.clear();
+              _priceController.clear();
+              _barcodeController.clear();
+              setState(() {
+                _imageUrl = null;
+                _selectedProductCategory = null;
+              });
+              showDialog(
+                context: context,
+                builder: (context) => _buildProductForm(),
+              );
+              break;
+            case 1: // Categories tab
+              _categoryNameController.clear();
+              setState(() => _categoryImageUrl = null);
+              showDialog(
+                context: context,
+                builder: (context) => _buildCategoryForm(),
+              );
+              break;
+            case 2: // Discounts tab
+              _discountNameController.clear();
+              _discountValueController.clear();
+              _discountTypeController.clear();
+              setState(() {
+                _selectedDiscountCategory = null;
+                _discountStartDate = null;
+                _discountEndDate = null;
+              });
+              showDialog(
+                context: context,
+                builder: (context) => _buildDiscountForm(),
+              );
+              break;
+          }
+        },
+        child: const Icon(Icons.add),
+      ),
+    );
+  }
+
+  Widget _buildProductsTab() {
+    return Padding(
+      padding: const EdgeInsets.all(16.0),
+      child: StreamBuilder<QuerySnapshot>(
+        stream: FirebaseFirestore.instance.collection('products').snapshots(),
+        builder: (context, snapshot) {
+          if (!snapshot.hasData) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          return ListView.builder(
+            itemCount: snapshot.data!.docs.length,
+            itemBuilder: (context, index) {
+              final doc = snapshot.data!.docs[index];
+              final product = Product.fromMap(doc.data() as Map<String, dynamic>, doc.id);
+              
+              return ListTile(
+                leading: product.imageUrl != null 
+                    ? Image.network(product.imageUrl!, width: 50, height: 50)
+                    : const Icon(Icons.shopping_bag),
+                title: Text(product.name),
+                subtitle: Text('€${product.price} - ${product.category}'),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.edit),
+                      onPressed: () => _editProduct(product),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.delete),
+                      onPressed: () => _deleteProduct(doc.id),
+                    ),
+                  ],
+                ),
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildCategoriesTab() {
+    return Padding(
+      padding: const EdgeInsets.all(16.0),
+      child: StreamBuilder<QuerySnapshot>(
+        stream: FirebaseFirestore.instance.collection('categories').snapshots(),
+        builder: (context, snapshot) {
+          if (!snapshot.hasData) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          return ListView.builder(
+            itemCount: snapshot.data!.docs.length,
+            itemBuilder: (context, index) {
+              final doc = snapshot.data!.docs[index];
+              return ListTile(
+                leading: doc['imageUrl'] != null 
+                    ? Image.network(doc['imageUrl'], width: 50, height: 50)
+                    : const Icon(Icons.category),
+                title: Text(doc['name']),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.edit),
+                      onPressed: () => _editCategory(doc),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.delete),
+                      onPressed: () => _deleteCategory(doc.id),
+                    ),
+                  ],
+                ),
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildDiscountsTab() {
+    return Padding(
+      padding: const EdgeInsets.all(16.0),
+      child: StreamBuilder<QuerySnapshot>(
+        stream: FirebaseFirestore.instance.collection('discounts').snapshots(),
+        builder: (context, snapshot) {
+          if (!snapshot.hasData) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          return ListView.builder(
+            itemCount: snapshot.data!.docs.length,
+            itemBuilder: (context, index) {
+              final doc = snapshot.data!.docs[index];
+              final data = doc.data() as Map<String, dynamic>;
+              final startDate = (data['startDate'] as Timestamp).toDate();
+              final endDate = (data['endDate'] as Timestamp).toDate();
+              
+              return ListTile(
+                leading: const Icon(Icons.discount),
+                title: Text('${data['name']} - ${data['value']}${data['type']} (${data['category']})'),
+                subtitle: Text('${_formatDate(startDate)} to ${_formatDate(endDate)}'),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.edit),
+                      onPressed: () => _editDiscount(doc),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.delete),
+                      onPressed: () => _deleteDiscount(doc.id),
+                    ),
+                  ],
+                ),
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+
+  String _formatDate(DateTime date) {
+    return '${date.day}/${date.month}/${date.year}';
+  }
+
+  Widget _buildProductForm({bool isEditing = false, String? productId}) {
+    return AlertDialog(
+      title: Text(isEditing ? 'Edit Product' : 'Add New Product'),
+      content: SingleChildScrollView(
+        child: Form(
+          key: _formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextFormField(
+                controller: _nameController,
+                decoration: const InputDecoration(labelText: 'Product Name'),
+                validator: (value) => value!.isEmpty ? 'Required' : null,
+              ),
+              TextFormField(
+                controller: _priceController,
+                decoration: const InputDecoration(labelText: 'Price'),
+                keyboardType: TextInputType.number,
+                validator: (value) => value!.isEmpty ? 'Required' : null,
+              ),
+              StreamBuilder<QuerySnapshot>(
+                stream: FirebaseFirestore.instance.collection('categories').snapshots(),
+                builder: (context, snapshot) {
+                  if (!snapshot.hasData) return const SizedBox();
+                  
+                  final categories = snapshot.data!.docs.map((doc) {
+                    return DropdownMenuItem<String>(
+                      value: doc['name'],
+                      child: Text(doc['name']),
+                    );
+                  }).toList();
+                  
+                  return DropdownButtonFormField<String>(
+                    value: _selectedProductCategory,
+                    decoration: const InputDecoration(labelText: 'Category'),
+                    items: categories,
+                    onChanged: (value) {
+                      setState(() {
+                        _selectedProductCategory = value;
+                      });
+                    },
+                    validator: (value) => value == null ? 'Please select a category' : null,
+                  );
+                },
+              ),
+              TextFormField(
+                controller: _barcodeController,
+                decoration: const InputDecoration(labelText: 'Barcode'),
+                validator: (value) => value!.isEmpty ? 'Required' : null,
+              ),
+              const SizedBox(height: 20),
+              _imageUrl != null
+                  ? Image.network(_imageUrl!, height: 150)
+                  : Container(),
+              ElevatedButton(
+                onPressed: _isLoading ? null : _pickImage,
+                child: _isLoading 
+                    ? const CircularProgressIndicator()
+                    : const Text('Upload Image'),
+              )
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        ElevatedButton(
+          onPressed: () => isEditing 
+              ? _updateProduct(productId!)
+              : _addProduct(),
+          child: Text(isEditing ? 'Update' : 'Add'),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildCategoryForm({bool isEditing = false, String? categoryId}) {
+    return AlertDialog(
+      title: Text(isEditing ? 'Edit Category' : 'Add New Category'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextFormField(
+              controller: _categoryNameController,
+              decoration: const InputDecoration(labelText: 'Category Name'),
+              validator: (value) => value!.isEmpty ? 'Required' : null,
+            ),
+            const SizedBox(height: 20),
+            _categoryImageUrl != null
+                ? Image.network(_categoryImageUrl!, height: 150)
+                : Container(),
+            ElevatedButton(
+              onPressed: _pickCategoryImage,
+              child: const Text('Upload Image'),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        ElevatedButton(
+          onPressed: () => isEditing 
+              ? _updateCategory(categoryId!)
+              : _addCategory(),
+          child: Text(isEditing ? 'Update' : 'Add'),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildDiscountForm({bool isEditing = false, String? discountId}) {
+    return AlertDialog(
+      title: Text(isEditing ? 'Edit Discount' : 'Add New Discount'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextFormField(
+              controller: _discountNameController,
+              decoration: const InputDecoration(labelText: 'Discount Name'),
+              validator: (value) => value!.isEmpty ? 'Required' : null,
+            ),
+            TextFormField(
+              controller: _discountValueController,
+              decoration: const InputDecoration(labelText: 'Value'),
+              keyboardType: TextInputType.number,
+              validator: (value) => value!.isEmpty ? 'Required' : null,
+            ),
+            TextFormField(
+              controller: _discountTypeController,
+              decoration: const InputDecoration(labelText: 'Type (e.g., %, \$)'),
+              validator: (value) => value!.isEmpty ? 'Required' : null,
+            ),
+            StreamBuilder<QuerySnapshot>(
+              stream: FirebaseFirestore.instance.collection('categories').snapshots(),
+              builder: (context, snapshot) {
+                if (!snapshot.hasData) return const SizedBox();
+                
+                final categories = snapshot.data!.docs.map((doc) {
+                  return DropdownMenuItem<String>(
+                    value: doc['name'],
+                    child: Text(doc['name']),
+                  );
+                }).toList();
+                
+                return DropdownButtonFormField<String>(
+                  value: _selectedDiscountCategory,
+                  decoration: const InputDecoration(labelText: 'Category'),
+                  items: categories,
+                  onChanged: (value) {
+                    setState(() {
+                      _selectedDiscountCategory = value;
+                    });
+                  },
+                  validator: (value) => value == null ? 'Please select a category' : null,
+                );
+              },
+            ),
+            const SizedBox(height: 10),
+            ListTile(
+              title: Text(_discountStartDate == null 
+                  ? 'Select Start Date' 
+                  : 'Start: ${_formatDate(_discountStartDate!)}'),
+              trailing: const Icon(Icons.calendar_today),
+              onTap: () => _selectStartDate(context),
+            ),
+            ListTile(
+              title: Text(_discountEndDate == null 
+                  ? 'Select End Date' 
+                  : 'End: ${_formatDate(_discountEndDate!)}'),
+              trailing: const Icon(Icons.calendar_today),
+              onTap: () => _selectEndDate(context),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        ElevatedButton(
+          onPressed: () => isEditing 
+              ? _updateDiscount(discountId!)
+              : _addDiscount(),
+          child: Text(isEditing ? 'Update' : 'Add'),
+        ),
+      ],
+    );
   }
 }

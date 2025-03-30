@@ -14,7 +14,7 @@ class Discount {
     required this.startDate,
     required this.endDate,
     required this.value,
-    required this.type,
+    required this.type, required String name,
   });
 
   factory Discount.fromFirestore(Map<String, dynamic> data) {
@@ -24,7 +24,7 @@ class Discount {
       startDate: (data['startDate'] as Timestamp?)?.toDate() ?? DateTime.now(),
       endDate: (data['endDate'] as Timestamp?)?.toDate() ?? DateTime.now().add(const Duration(days: 30)),
       value: (data['value'] as num?)?.toDouble() ?? 0.0,
-      type: data['type'] as String? ?? 'percentage', // Default to percentage
+      type: data['type'] as String? ?? 'percentage', name: '', // Default to percentage
     );
   }
 

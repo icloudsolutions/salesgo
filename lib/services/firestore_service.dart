@@ -66,5 +66,33 @@ class FirestoreService {
     }
   }
 
+
+
+  // Categories
+  Future<void> addCategory(Map<String, dynamic> categoryData) async {
+    await _firestore.collection('categories').add(categoryData);
+  }
+
+  Stream<QuerySnapshot> getCategories() {
+    return _firestore.collection('categories').snapshots();
+  }
+
+  Future<void> deleteCategory(String categoryId) async {
+    await _firestore.collection('categories').doc(categoryId).delete();
+  }
+
+  // Discounts
+  Future<void> addDiscount(Map<String, dynamic> discountData) async {
+    await _firestore.collection('discounts').add(discountData);
+  }
+
+  Stream<QuerySnapshot> getDiscounts() {
+    return _firestore.collection('discounts').snapshots();
+  }
+
+  Future<void> deleteDiscount(String discountId) async {
+    await _firestore.collection('discounts').doc(discountId).delete();
+  }
 }
+
 

@@ -39,7 +39,7 @@ class Sale {
       agentId: data['agentId'] as String? ?? '',
       date: (data['date'] as Timestamp?)?.toDate() ?? DateTime.now(),
       products: (data['products'] as List?)?.map((p) => 
-        Product.fromMap(p as Map<String, dynamic>)).toList() ?? [],
+        Product.fromMap(p as Map<String, dynamic>, p['id'] as String? ?? '')).toList() ?? [],
       totalAmount: (data['totalAmount'] as num?)?.toDouble() ?? 0.0,
       paymentMethod: data['paymentMethod'] as String? ?? '',
       couponCode: data['couponCode'] as String?,
@@ -48,7 +48,7 @@ class Sale {
 
   static List<Product> _parseProducts(dynamic productsData) {
     if (productsData is! List) return [];
-    return productsData.map((p) => Product.fromMap(p as Map<String, dynamic>)).toList();
+    return productsData.map((p) => Product.fromMap(p as Map<String, dynamic>, p['id'] as String? ?? '')).toList();
   }
 
 }

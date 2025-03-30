@@ -18,7 +18,6 @@ class _StockManagementState extends State<StockManagement> {
   final _productController = TextEditingController();
   final _quantityController = TextEditingController();
   List<Map<String, dynamic>> _products = [];
-  Map<String, dynamic>? _selectedProduct;
 
   @override
   void initState() {
@@ -34,7 +33,6 @@ class _StockManagementState extends State<StockManagement> {
         return {
           'id': doc.id,
           'name': data['name'] ?? 'Unknown Product',
-          'barcode': data['barcode'] ?? '',
           'category': data['category'] ?? '',
         };
       }).toList();
@@ -82,24 +80,20 @@ class _StockManagementState extends State<StockManagement> {
               key: _formKey,
               child: Column(
                 children: [
-                  Autocomplete<Map<String, dynamic>>(
+                  Autocomplete<String>(
                     optionsBuilder: (TextEditingValue textEditingValue) {
                       if (textEditingValue.text.isEmpty) {
-                        return const Iterable<Map<String, dynamic>>.empty();
+                        return const Iterable<String>.empty();
                       }
-                      return _products.where((product) => 
-                        product['name'].toLowerCase().contains(textEditingValue.text.toLowerCase()) ||
-                        (product['barcode']?.toString() ?? '').contains(textEditingValue.text)
-                      );
+                      return _products
+                          .where((product) => product['name']
+                              .toLowerCase()
+                              .contains(textEditingValue.text.toLowerCase()))
+                          .map((product) => product['id']);
                     },
-                    onSelected: (Map<String, dynamic> selection) {
-                      setState(() {
-                        _selectedProduct = selection;
-                        _productController.text = '${selection['name']} (${selection['barcode']})';
-                      });
+                    onSelected: (String selection) {
+                      _productController.text = selection;
                     },
-                    displayStringForOption: (Map<String, dynamic> option) => 
-                      '${option['name']} (${option['barcode']})',
                     fieldViewBuilder: (
                       BuildContext context,
                       TextEditingController textEditingController,
@@ -113,18 +107,12 @@ class _StockManagementState extends State<StockManagement> {
                           labelText: 'Search Product',
                           border: OutlineInputBorder(),
                         ),
-                        validator: (value) {
-                          if (value == null || value.isEmpty) {
-                            return 'Please select a product';
-                          }
-                          return null;
-                        },
                       );
                     },
                     optionsViewBuilder: (
                       BuildContext context,
-                      AutocompleteOnSelected<Map<String, dynamic>> onSelected,
-                      Iterable<Map<String, dynamic>> options,
+                      AutocompleteOnSelected<String> onSelected,
+                      Iterable<String> options,
                     ) {
                       return Align(
                         alignment: Alignment.topLeft,
@@ -136,23 +124,18 @@ class _StockManagementState extends State<StockManagement> {
                               padding: EdgeInsets.zero,
                               itemCount: options.length,
                               itemBuilder: (BuildContext context, int index) {
-                                final product = options.elementAt(index);
+                                final option = options.elementAt(index);
+                                final product = _products.firstWhere(
+                                  (p) => p['id'] == option,
+                                  orElse: () => {'name': 'Unknown'},
+                                );
                                 return InkWell(
                                   onTap: () {
-                                    onSelected(product);
+                                    onSelected(option);
                                   },
                                   child: Padding(
                                     padding: const EdgeInsets.all(16.0),
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          product['name'],
-                                          style: const TextStyle(fontWeight: FontWeight.bold),
-                                        ),
-                                        Text('Barcode: ${product['barcode']}'),
-                                      ],
-                                    ),
+                                    child: Text(product['name']),
                                   ),
                                 );
                               },
@@ -290,19 +273,25 @@ class _StockManagementState extends State<StockManagement> {
       return;
     }
 
-    if (_selectedProduct == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please select a product')),
-      );
-      return;
-    }
-
     if (_formKey.currentState!.validate()) {
-      final productId = _selectedProduct!['id'];
+      final productId = _productController.text;
       final quantity = int.parse(_quantityController.text);
       final authVM = Provider.of<AuthViewModel>(context, listen: false);
 
       try {
+        // Verify product exists
+        final productDoc = await FirebaseFirestore.instance
+            .collection('products')
+            .doc(productId)
+            .get();
+
+        if (!productDoc.exists) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Product does not exist')),
+          );
+          return;
+        }
+
         // Update stock
         await FirebaseFirestore.instance
             .collection('cars/$_selectedCarId/stock')
@@ -327,7 +316,6 @@ class _StockManagementState extends State<StockManagement> {
         // Clear form
         _productController.clear();
         _quantityController.clear();
-        setState(() => _selectedProduct = null);
         FocusScope.of(context).requestFocus(FocusNode());
       } catch (e) {
         ScaffoldMessenger.of(context).showSnackBar(
