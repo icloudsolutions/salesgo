@@ -46,10 +46,24 @@ class _AgentHomeScreenState extends State<AgentHomeScreen> {
     setState(() => _selectedIndex = index);
   }
 
+  void _logout(BuildContext context) async {
+    final authVM = Provider.of<AuthViewModel>(context, listen: false);
+    await authVM.signOut();
+    Navigator.pushReplacementNamed(context, '/');
+  }
+  
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Coach Mobile Dashboard')),
+      appBar: AppBar(
+        title: const Text('Coach Mobile Dashboard'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.logout),
+            onPressed: () => _logout(context),
+          ),
+        ],
+      ),
       body: _agentScreens.elementAt(_selectedIndex),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _selectedIndex,
