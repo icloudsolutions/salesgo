@@ -27,7 +27,6 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
 
   // For categories
   final _categoryNameController = TextEditingController();
-  String? _categoryImageUrl;
 
   // For discounts
   final _discountNameController = TextEditingController();
@@ -69,29 +68,6 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
         
         await ref.putFile(File(pickedFile.path));
         _imageUrl = await ref.getDownloadURL();
-      } catch (e) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to upload image: $e')),
-        );
-      } finally {
-        setState(() => _isLoading = false);
-      }
-    }
-  }
-
-  Future<void> _pickCategoryImage() async {
-    final picker = ImagePicker();
-    final pickedFile = await picker.pickImage(source: ImageSource.gallery);
-
-    if (pickedFile != null) {
-      setState(() => _isLoading = true);
-      try {
-        final ref = FirebaseStorage.instance
-            .ref()
-            .child('category_images/${DateTime.now().millisecondsSinceEpoch}');
-        
-        await ref.putFile(File(pickedFile.path));
-        _categoryImageUrl = await ref.getDownloadURL();
       } catch (e) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Failed to upload image: $e')),
@@ -182,7 +158,6 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
     try {
       await FirebaseFirestore.instance.collection('categories').add({
         'name': _categoryNameController.text,
-        'imageUrl': _categoryImageUrl,
         'createdAt': FieldValue.serverTimestamp(),
       });
 
@@ -192,7 +167,6 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
 
       // Clear form
       _categoryNameController.clear();
-      setState(() => _categoryImageUrl = null);
       Navigator.pop(context);
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -218,7 +192,6 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
           .doc(categoryId)
           .update({
             'name': _categoryNameController.text,
-            'imageUrl': _categoryImageUrl,
           });
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -432,7 +405,6 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
 
   Future<void> _editCategory(DocumentSnapshot category) async {
     _categoryNameController.text = category['name'];
-    setState(() => _categoryImageUrl = category['imageUrl']);
 
     await showDialog(
       context: context,
@@ -498,7 +470,7 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
               break;
             case 1: // Categories tab
               _categoryNameController.clear();
-              setState(() => _categoryImageUrl = null);
+              //setState(() => _categoryImageUrl = null);
               showDialog(
                 context: context,
                 builder: (context) => _buildCategoryForm(),
@@ -581,9 +553,7 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
             itemBuilder: (context, index) {
               final doc = snapshot.data!.docs[index];
               return ListTile(
-                leading: doc['imageUrl'] != null 
-                    ? Image.network(doc['imageUrl'], width: 50, height: 50)
-                    : const Icon(Icons.category),
+                leading: const Icon(Icons.category),
                 title: Text(doc['name']),
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
@@ -742,14 +712,6 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
               controller: _categoryNameController,
               decoration: const InputDecoration(labelText: 'Category Name'),
               validator: (value) => value!.isEmpty ? 'Required' : null,
-            ),
-            const SizedBox(height: 20),
-            _categoryImageUrl != null
-                ? Image.network(_categoryImageUrl!, height: 150)
-                : Container(),
-            ElevatedButton(
-              onPressed: _pickCategoryImage,
-              child: const Text('Upload Image'),
             ),
           ],
         ),
