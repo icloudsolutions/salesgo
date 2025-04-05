@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:salesgo/views/admin/admin_home_screen.dart';
-import 'package:salesgo/views/admin/users_screen.dart';
+import 'package:salesgo/views/admin/users_management.dart';
 import 'package:salesgo/views/agent/agent_home_screen.dart';
 import 'package:salesgo/views/agent/history_screen.dart';
 import 'package:salesgo/views/agent/stock_screen.dart';

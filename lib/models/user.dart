@@ -2,14 +2,14 @@ class AppUser {
   final String uid;
   final String email;
   final String role;
-  final String? assignedCarId;
+  final String? assignedLocationId;
   final String name;
 
   AppUser({
     required this.uid,
     required this.email,
     required this.role,
-    this.assignedCarId,
+    this.assignedLocationId,
     required this.name,
   });
 
@@ -18,8 +18,8 @@ class AppUser {
       uid: data['uid'] ?? '',
       email: data['email'] ?? '',
       role: data['role'] ?? 'agent',
-      assignedCarId: data['assignedCarId'],
-      name: data['name'] ?? 'Unknown',
+      assignedLocationId: data['assignedLocationId'],
+      name: data['name'] ?? 'Agent Name',
     );
   }
 
@@ -27,7 +27,7 @@ class AppUser {
     'uid': uid,
     'email': email,
     'role': role,
-    'assignedCarId': assignedCarId,
+    'assignedLocationId': assignedLocationId,
     'name': name,
   };
 

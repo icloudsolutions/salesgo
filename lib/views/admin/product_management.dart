@@ -24,6 +24,7 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
   final _barcodeController = TextEditingController();
   String? _imageUrl;
   bool _isLoading = false;
+  bool _hasDateRange = false; // New flag for date range toggle
 
   // For categories
   final _categoryNameController = TextEditingController();
@@ -211,38 +212,48 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
     if (_discountNameController.text.isEmpty ||
         _discountValueController.text.isEmpty ||
         _discountTypeController.text.isEmpty ||
-        _selectedDiscountCategory == null ||
-        _discountStartDate == null ||
-        _discountEndDate == null) {
+        _selectedDiscountCategory == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('All fields are required')),
+        const SnackBar(content: Text('Required fields are missing')),
       );
       return;
     }
 
-    if (_discountEndDate!.isBefore(_discountStartDate!)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('End date must be after start date')),
-      );
-      return;
+    // Only validate dates if the user has enabled date range
+    if (_hasDateRange) {
+      if (_discountStartDate == null || _discountEndDate == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Date range is enabled but not set')),
+        );
+        return;
+      }
+
+      if (_discountEndDate!.isBefore(_discountStartDate!)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('End date must be after start date')),
+        );
+        return;
+      }
     }
 
     setState(() => _isLoading = true);
     try {
-      final discount = Discount(
-        id: FirebaseFirestore.instance.collection('discounts').doc().id,
-        name: _discountNameController.text,
-        category: _selectedDiscountCategory!,
-        startDate: _discountStartDate!,
-        endDate: _discountEndDate!,
-        value: double.parse(_discountValueController.text),
-        type: _discountTypeController.text,
-      );
+      final discountData = {
+        'id': FirebaseFirestore.instance.collection('discounts').doc().id,
+        'name': _discountNameController.text,
+        'category': _selectedDiscountCategory!,
+        'value': double.parse(_discountValueController.text),
+        'type': _discountTypeController.text,
+        'hasDateRange': _hasDateRange,
+        // Only store dates if range enabled
+        if (_hasDateRange) 'startDate': _discountStartDate!,
+        if (_hasDateRange) 'endDate': _discountEndDate!,
+      };
 
       await FirebaseFirestore.instance
           .collection('discounts')
-          .doc(discount.id)
-          .set(discount.toMap());
+          .doc(discountData['id'] as String?)
+          .set(discountData);
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Discount added successfully')),
@@ -256,6 +267,7 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
         _selectedDiscountCategory = null;
         _discountStartDate = null;
         _discountEndDate = null;
+        _hasDateRange = false;
       });
       Navigator.pop(context);
     } catch (e) {
@@ -271,35 +283,53 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
     if (_discountNameController.text.isEmpty ||
         _discountValueController.text.isEmpty ||
         _discountTypeController.text.isEmpty ||
-        _selectedDiscountCategory == null ||
-        _discountStartDate == null ||
-        _discountEndDate == null) {
+        _selectedDiscountCategory == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('All fields are required')),
+        const SnackBar(content: Text('Required fields are missing')),
       );
       return;
     }
 
-    if (_discountEndDate!.isBefore(_discountStartDate!)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('End date must be after start date')),
-      );
-      return;
+    // Only validate dates if date range is enabled
+    if (_hasDateRange) {
+      if (_discountStartDate == null || _discountEndDate == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Date range is enabled but dates are not set')),
+        );
+        return;
+      }
+      if (_discountEndDate!.isBefore(_discountStartDate!)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('End date must be after start date')),
+        );
+        return;
+      }
     }
 
     setState(() => _isLoading = true);
     try {
+      final updateData = {
+        'name': _discountNameController.text,
+        'category': _selectedDiscountCategory!,
+        'value': double.parse(_discountValueController.text),
+        'type': _discountTypeController.text,
+        'hasDateRange': _hasDateRange,
+      };
+
+      // Conditionally update dates
+      if (_hasDateRange) {
+        updateData['startDate'] = _discountStartDate!;
+        updateData['endDate'] = _discountEndDate!;
+      } else {
+        // Remove dates if date range is disabled
+        updateData['startDate'] = FieldValue.delete();
+        updateData['endDate'] = FieldValue.delete();
+      }
+
       await FirebaseFirestore.instance
           .collection('discounts')
           .doc(discountId)
-          .update({
-            'name': _discountNameController.text,
-            'category': _selectedDiscountCategory,
-            'startDate': _discountStartDate,
-            'endDate': _discountEndDate,
-            'value': double.parse(_discountValueController.text),
-            'type': _discountTypeController.text,
-          });
+          .update(updateData);
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Discount updated successfully')),
@@ -312,6 +342,30 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
     } finally {
       setState(() => _isLoading = false);
     }
+  }
+  // Update the _editDiscount method to handle the new hasDateRange field
+  Future<void> _editDiscount(DocumentSnapshot discount) async {
+    final data = discount.data() as Map<String, dynamic>;
+    _discountNameController.text = data['name'] ?? '';
+    _discountValueController.text = data['value'].toString();
+    _discountTypeController.text = data['type'];
+    _selectedDiscountCategory = data['category'];
+    
+    setState(() {
+      _hasDateRange = data['hasDateRange'] ?? false;
+      if (_hasDateRange) {
+        _discountStartDate = (data['startDate'] as Timestamp).toDate();
+        _discountEndDate = (data['endDate'] as Timestamp).toDate();
+      } else {
+        _discountStartDate = null;
+        _discountEndDate = null;
+      }
+    });
+
+    await showDialog(
+      context: context,
+      builder: (context) => _buildDiscountForm(isEditing: true, discountId: discount.id),
+    );
   }
 
   Future<void> _deleteProduct(String productId) async {
@@ -409,21 +463,6 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
     await showDialog(
       context: context,
       builder: (context) => _buildCategoryForm(isEditing: true, categoryId: category.id),
-    );
-  }
-
-  Future<void> _editDiscount(DocumentSnapshot discount) async {
-    final data = discount.data() as Map<String, dynamic>;
-    _discountNameController.text = data['name'] ?? '';
-    _discountValueController.text = data['value'].toString();
-    _discountTypeController.text = data['type'];
-    _selectedDiscountCategory = data['category'];
-    _discountStartDate = (data['startDate'] as Timestamp).toDate();
-    _discountEndDate = (data['endDate'] as Timestamp).toDate();
-
-    await showDialog(
-      context: context,
-      builder: (context) => _buildDiscountForm(isEditing: true, discountId: discount.id),
     );
   }
 
@@ -576,6 +615,8 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
     );
   }
 
+  // Update the _buildDiscountsTab method to show date range info
+  // Update the _buildDiscountsTab method to show date range info
   Widget _buildDiscountsTab() {
     return Padding(
       padding: const EdgeInsets.all(16.0),
@@ -590,13 +631,19 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
             itemBuilder: (context, index) {
               final doc = snapshot.data!.docs[index];
               final data = doc.data() as Map<String, dynamic>;
-              final startDate = (data['startDate'] as Timestamp).toDate();
-              final endDate = (data['endDate'] as Timestamp).toDate();
+              final hasDateRange = data['hasDateRange'] ?? false;
+              String dateText = 'No date range';
+              
+              if (hasDateRange && data['startDate'] != null && data['endDate'] != null) {
+                final startDate = (data['startDate'] as Timestamp).toDate();
+                final endDate = (data['endDate'] as Timestamp).toDate();
+                dateText = '${_formatDate(startDate)} to ${_formatDate(endDate)}';
+              }
               
               return ListTile(
                 leading: const Icon(Icons.discount),
                 title: Text('${data['name']} - ${data['value']}${data['type']} (${data['category']})'),
-                subtitle: Text('${_formatDate(startDate)} to ${_formatDate(endDate)}'),
+                subtitle: Text(dateText),
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -731,84 +778,133 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
     );
   }
 
+  // Update the _buildDiscountForm method
   Widget _buildDiscountForm({bool isEditing = false, String? discountId}) {
-    return AlertDialog(
-      title: Text(isEditing ? 'Edit Discount' : 'Add New Discount'),
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextFormField(
-              controller: _discountNameController,
-              decoration: const InputDecoration(labelText: 'Discount Name'),
-              validator: (value) => value!.isEmpty ? 'Required' : null,
-            ),
-            TextFormField(
-              controller: _discountValueController,
-              decoration: const InputDecoration(labelText: 'Value'),
-              keyboardType: TextInputType.number,
-              validator: (value) => value!.isEmpty ? 'Required' : null,
-            ),
-            TextFormField(
-              controller: _discountTypeController,
-              decoration: const InputDecoration(labelText: 'Type (e.g., %, \$)'),
-              validator: (value) => value!.isEmpty ? 'Required' : null,
-            ),
-            StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance.collection('categories').snapshots(),
-              builder: (context, snapshot) {
-                if (!snapshot.hasData) return const SizedBox();
-                
-                final categories = snapshot.data!.docs.map((doc) {
-                  return DropdownMenuItem<String>(
-                    value: doc['name'],
-                    child: Text(doc['name']),
-                  );
-                }).toList();
-                
-                return DropdownButtonFormField<String>(
-                  value: _selectedDiscountCategory,
-                  decoration: const InputDecoration(labelText: 'Category'),
-                  items: categories,
-                  onChanged: (value) {
-                    setState(() {
-                      _selectedDiscountCategory = value;
+    return StatefulBuilder(
+      builder: (BuildContext context, StateSetter setDialogState) {
+        return AlertDialog(
+          title: Text(isEditing ? 'Edit Discount' : 'Add New Discount'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextFormField(
+                  controller: _discountNameController,
+                  decoration: const InputDecoration(labelText: 'Discount Name'),
+                  validator: (value) => value!.isEmpty ? 'Required' : null,
+                ),
+                TextFormField(
+                  controller: _discountValueController,
+                  decoration: const InputDecoration(labelText: 'Value'),
+                  keyboardType: TextInputType.number,
+                  validator: (value) => value!.isEmpty ? 'Required' : null,
+                ),
+                TextFormField(
+                  controller: _discountTypeController,
+                  decoration: const InputDecoration(labelText: 'Type (e.g., %, \$)'),
+                  validator: (value) => value!.isEmpty ? 'Required' : null,
+                ),
+                StreamBuilder<QuerySnapshot>(
+                  stream: FirebaseFirestore.instance.collection('categories').snapshots(),
+                  builder: (context, snapshot) {
+                    if (!snapshot.hasData) return const SizedBox();
+                    
+                    final categories = snapshot.data!.docs.map((doc) {
+                      return DropdownMenuItem<String>(
+                        value: doc['name'],
+                        child: Text(doc['name']),
+                      );
+                    }).toList();
+                    
+                    return DropdownButtonFormField<String>(
+                      value: _selectedDiscountCategory,
+                      decoration: const InputDecoration(labelText: 'Category'),
+                      items: categories,
+                      onChanged: (value) {
+                        setDialogState(() {
+                          _selectedDiscountCategory = value;
+                        });
+                      },
+                      validator: (value) => value == null ? 'Please select a category' : null,
+                    );
+                  },
+                ),
+                const SizedBox(height: 10),
+                SwitchListTile(
+                  title: const Text('Date Range'),
+                  value: _hasDateRange,
+                  onChanged: (bool value) {
+                    setDialogState(() {
+                      _hasDateRange = value;
+                      if (!value) {
+                        _discountStartDate = null;
+                        _discountEndDate = null;
+                      }
                     });
                   },
-                  validator: (value) => value == null ? 'Please select a category' : null,
-                );
+                ),
+                if (_hasDateRange) ...[
+                  const SizedBox(height: 10),
+                  ListTile(
+                    title: Text(
+                      _discountStartDate == null 
+                          ? 'Select Start Date' 
+                          : 'Start: ${_formatDate(_discountStartDate!)}'
+                    ),
+                    trailing: const Icon(Icons.calendar_today),
+                    onTap: () async {
+                      final date = await showDatePicker(
+                        context: context,
+                        initialDate: DateTime.now(),
+                        firstDate: DateTime.now(),
+                        lastDate: DateTime(2101),
+                      );
+                      if (date != null) {
+                        setDialogState(() => _discountStartDate = date);
+                      }
+                    },
+                  ),
+                  ListTile(
+                    title: Text(
+                      _discountEndDate == null 
+                          ? 'Select End Date' 
+                          : 'End: ${_formatDate(_discountEndDate!)}'
+                    ),
+                    trailing: const Icon(Icons.calendar_today),
+                    onTap: () async {
+                      final date = await showDatePicker(
+                        context: context,
+                        initialDate: _discountStartDate ?? DateTime.now(),
+                        firstDate: _discountStartDate ?? DateTime.now(),
+                        lastDate: DateTime(2101),
+                      );
+                      if (date != null) {
+                        setDialogState(() => _discountEndDate = date);
+                      }
+                    },
+                  ),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                if (isEditing) {
+                  _updateDiscount(discountId!);
+                } else {
+                  _addDiscount();
+                }
               },
-            ),
-            const SizedBox(height: 10),
-            ListTile(
-              title: Text(_discountStartDate == null 
-                  ? 'Select Start Date' 
-                  : 'Start: ${_formatDate(_discountStartDate!)}'),
-              trailing: const Icon(Icons.calendar_today),
-              onTap: () => _selectStartDate(context),
-            ),
-            ListTile(
-              title: Text(_discountEndDate == null 
-                  ? 'Select End Date' 
-                  : 'End: ${_formatDate(_discountEndDate!)}'),
-              trailing: const Icon(Icons.calendar_today),
-              onTap: () => _selectEndDate(context),
+              child: Text(isEditing ? 'Update' : 'Add'),
             ),
           ],
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Cancel'),
-        ),
-        ElevatedButton(
-          onPressed: () => isEditing 
-              ? _updateDiscount(discountId!)
-              : _addDiscount(),
-          child: Text(isEditing ? 'Update' : 'Add'),
-        ),
-      ],
+        );
+      },
     );
   }
 }

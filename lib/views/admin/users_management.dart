@@ -11,7 +11,7 @@ class UsersScreen extends StatelessWidget {
     Provider.of<AuthViewModel>(context);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Gestion des Agents')),
+      appBar: AppBar(title: const Text('Agent Management')),
       floatingActionButton: FloatingActionButton(
         child: const Icon(Icons.add),
         onPressed: () => _createNewUser(context),

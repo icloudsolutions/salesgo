@@ -26,9 +26,9 @@ class _AgentHomeScreenState extends State<AgentHomeScreen> {
       final discountVM = context.read<DiscountViewModel>();
       final authVM = context.read<AuthViewModel>();
       
-      // Load stock for the assigned car (if any)
-      if (authVM.currentUser?.assignedCarId != null) {
-        stockVM.loadStock(authVM.currentUser!.assignedCarId!);
+      // Load stock for the assigned location (if any)
+      if (authVM.currentUser?.assignedLocationId != null) {
+        stockVM.loadStock(authVM.currentUser!.assignedLocationId!);
       }
       
       // Load active discounts

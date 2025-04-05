@@ -14,7 +14,7 @@ class StockScreen extends StatefulWidget {
 }
 
 class _StockScreenState extends State<StockScreen> {
-  int _selectedTabIndex = 0; // 0 for current stock, 1 for history
+  int _selectedTabIndex = 0;
 
   @override
   void initState() {
@@ -28,8 +28,8 @@ class _StockScreenState extends State<StockScreen> {
     final authVM = Provider.of<AuthViewModel>(context, listen: false);
     final stockVM = Provider.of<StockViewModel>(context, listen: false);
     
-    if (authVM.currentUser?.assignedCarId != null) {
-      stockVM.loadStock(authVM.currentUser!.assignedCarId!);
+    if (authVM.currentUser?.assignedLocationId != null) {
+      stockVM.loadStock(authVM.currentUser!.assignedLocationId!);
     }
   }
 
@@ -57,17 +57,15 @@ class _StockScreenState extends State<StockScreen> {
   }
 
   Widget _buildBody(AuthViewModel authVM, StockViewModel stockVM) {
-    // No user logged in
     if (authVM.currentUser == null) {
       return const Center(child: Text('Please log in'));
     }
 
-    // No car assigned
-    if (authVM.currentUser!.assignedCarId == null) {
+    if (authVM.currentUser!.assignedLocationId == null) {
       return Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Text('No car assigned to you'),
+          const Text('No location assigned to you'),
           const SizedBox(height: 20),
           ElevatedButton(
             onPressed: _loadData,
@@ -75,7 +73,7 @@ class _StockScreenState extends State<StockScreen> {
           ),
           const SizedBox(height: 20),
           Text(
-            'Please contact your administrator to assign a vehicle',
+            'Please contact your administrator to assign a location',
             style: Theme.of(context).textTheme.bodySmall,
             textAlign: TextAlign.center,
           ),
@@ -83,18 +81,29 @@ class _StockScreenState extends State<StockScreen> {
       );
     }
 
-    return TabBarView(
-      children: [
-        // Current Stock Tab
-        _buildCurrentStockTab(stockVM),
+    return FutureBuilder<DocumentSnapshot>(
+      future: FirebaseFirestore.instance
+          .collection('locations')
+          .doc(authVM.currentUser!.assignedLocationId)
+          .get(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) {
+          return const Center(child: CircularProgressIndicator());
+        }
+
+        final location = snapshot.data!.data() as Map<String, dynamic>? ?? {};
         
-        // Stock History Tab
-        _buildStockHistoryTab(authVM),
-      ],
+        return TabBarView(
+          children: [
+            _buildCurrentStockTab(stockVM, location),
+            _buildStockHistoryTab(authVM, location),
+          ],
+        );
+      },
     );
   }
 
-  Widget _buildCurrentStockTab(StockViewModel stockVM) {
+  Widget _buildCurrentStockTab(StockViewModel stockVM, Map<String, dynamic> location) {
     if (stockVM.isLoading) {
       return const Center(child: CircularProgressIndicator());
     }
@@ -103,7 +112,7 @@ class _StockScreenState extends State<StockScreen> {
       return Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Text('No stock available for your assigned vehicle'),
+          Text('No stock available at ${location['name']} (${location['type']})'),
           const SizedBox(height: 20),
           ElevatedButton(
             onPressed: _loadData,
@@ -167,16 +176,11 @@ class _StockScreenState extends State<StockScreen> {
     );
   }
 
-  Widget _buildStockHistoryTab(AuthViewModel authVM) {
-    final carId = authVM.currentUser?.assignedCarId;
-    if (carId == null) {
-      return const Center(child: Text('No car assigned'));
-    }
-
+  Widget _buildStockHistoryTab(AuthViewModel authVM, Map<String, dynamic> location) {
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance
           .collection('stockHistory')
-          .where('carId', isEqualTo: carId)
+          .where('locationId', isEqualTo: authVM.currentUser!.assignedLocationId)
           .orderBy('timestamp', descending: true)
           .snapshots(),
       builder: (context, snapshot) {
@@ -201,7 +205,9 @@ class _StockScreenState extends State<StockScreen> {
         }
 
         if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-          return const Center(child: Text('No stock history available for your vehicle'));
+          return Center(
+            child: Text('No stock history at ${location['name']}'),
+          );
         }
 
         return ListView.builder(
@@ -233,8 +239,7 @@ class _StockScreenState extends State<StockScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text('Quantity: ${data['quantity']}'),
-                    if (data.containsKey('adminName'))
-                      Text('Updated by: ${data['adminName']}'),
+                    Text('Location: ${location['name']} (${location['type']})'),
                     Text(
                       DateFormat('dd/MM/yyyy HH:mm').format(
                         (data['timestamp'] as Timestamp).toDate(),

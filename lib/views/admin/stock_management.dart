@@ -14,7 +14,7 @@ class StockManagement extends StatefulWidget {
 }
 
 class _StockManagementState extends State<StockManagement> {
-  String? _selectedCarId;
+  String? _selectedLocationId;
   final _formKey = GlobalKey<FormState>();
   final _productController = TextEditingController();
   final _quantityController = TextEditingController();
@@ -170,27 +170,27 @@ class _StockManagementState extends State<StockManagement> {
                   ),
                 if (_isScanning) const SizedBox(height: 16),
                 
-                // Car Selection Dropdown
+                // Location Selection Dropdown
                 StreamBuilder<QuerySnapshot>(
-                  stream: FirebaseFirestore.instance.collection('cars').snapshots(),
+                  stream: FirebaseFirestore.instance.collection('locations').snapshots(),
                   builder: (context, snapshot) {
                     if (!snapshot.hasData) return const CircularProgressIndicator();
                     
                     return DropdownButtonFormField<String>(
-                      value: _selectedCarId,
+                      value: _selectedLocationId,
                       decoration: const InputDecoration(
-                        labelText: 'Select Car',
+                        labelText: 'Select Location',
                         border: OutlineInputBorder(),
                       ),
                       items: snapshot.data!.docs.map((doc) {
-                        final car = doc.data() as Map<String, dynamic>;
+                        final location = doc.data() as Map<String, dynamic>;
                         return DropdownMenuItem<String>(
                           value: doc.id,
-                          child: Text('${car['name']} (${car['plateNumber']})'),
+                          child: Text('${location['name']} (${location['type']})'),
                         );
                       }).toList(),
-                      onChanged: (value) => setState(() => _selectedCarId = value),
-                      validator: (value) => value == null ? 'Please select a car' : null,
+                      onChanged: (value) => setState(() => _selectedLocationId = value),
+                      validator: (value) => value == null ? 'Please select a location' : null,
                     );
                   },
                 ),
@@ -351,8 +351,8 @@ class _StockManagementState extends State<StockManagement> {
                                   return FutureBuilder(
                                     future: Future.wait([
                                       FirebaseFirestore.instance
-                                          .collection('cars')
-                                          .doc(data['carId'])
+                                          .collection('locations')
+                                          .doc(data['locationId'])
                                           .get(),
                                       FirebaseFirestore.instance
                                           .collection('products')
@@ -370,7 +370,7 @@ class _StockManagementState extends State<StockManagement> {
                                         );
                                       }
                                       
-                                      final car = snapshot.data![0].data() as Map<String, dynamic>? ?? {};
+                                      final location = snapshot.data![0].data() as Map<String, dynamic>? ?? {};
                                       final product = snapshot.data![1].data() as Map<String, dynamic>? ?? {};
                                       final admin = snapshot.data![2].data() as Map<String, dynamic>? ?? {};
                                       
@@ -381,7 +381,7 @@ class _StockManagementState extends State<StockManagement> {
                                           subtitle: Column(
                                             crossAxisAlignment: CrossAxisAlignment.start,
                                             children: [
-                                              Text('Car: ${car['name']} (${car['plateNumber']})'),
+                                              Text('Location: ${location['name']} (${location['type']})'),
                                               Text('Quantity: ${data['quantity']}'),
                                               Text('Admin: ${admin['email']}'),
                                             ],
@@ -414,9 +414,9 @@ class _StockManagementState extends State<StockManagement> {
   }
 
   Future<void> _assignStock() async {
-    if (_selectedCarId == null) {
+    if (_selectedLocationId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please select a car')),
+        const SnackBar(content: Text('Please select a location')),
       );
       return;
     }
@@ -436,14 +436,14 @@ class _StockManagementState extends State<StockManagement> {
       try {
         // Update stock
         await FirebaseFirestore.instance
-            .collection('cars/$_selectedCarId/stock')
+            .collection('locations/$_selectedLocationId/stock')
             .doc(productId)
             .set({'quantity': quantity});
 
         // Record history if admin
         if (authVM.userRole == 'admin') {
           await FirebaseFirestore.instance.collection('stockHistory').add({
-            'carId': _selectedCarId,
+            'locationId': _selectedLocationId,
             'productId': productId,
             'quantity': quantity,
             'timestamp': DateTime.now(),

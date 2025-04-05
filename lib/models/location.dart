@@ -1,21 +1,21 @@
-class Car {
+class Location {
   final String id;
   final String name;
-  final String plateNumber;
+  final String type; // Added location type
   final String? assignedAgentId;
 
-  Car({
+  Location({
     required this.id,
     required this.name,
-    required this.plateNumber,
+    required this.type,
     this.assignedAgentId,
   });
 
-  factory Car.fromFirestore(Map<String, dynamic> data) {
-    return Car(
+  factory Location.fromFirestore(Map<String, dynamic> data) {
+    return Location(
       id: data['id'],
       name: data['name'],
-      plateNumber: data['plateNumber'],
+      type: data['type'] ?? 'van', // Default type
       assignedAgentId: data['assignedAgentId'],
     );
   }
@@ -23,7 +23,7 @@ class Car {
   Map<String, dynamic> toMap() => {
     'id': id,
     'name': name,
-    'plateNumber': plateNumber,
+    'type': type,
     'assignedAgentId': assignedAgentId,
   };
 }

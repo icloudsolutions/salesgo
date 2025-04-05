@@ -6,7 +6,7 @@ import 'package:salesgo/viewmodels/discount_vm.dart';
 import 'package:salesgo/viewmodels/sales_vm.dart';
 import 'package:salesgo/viewmodels/stock_vm.dart';
 import 'package:salesgo/views/admin/admin_home_screen.dart';
-import 'package:salesgo/views/admin/users_screen.dart';
+import 'package:salesgo/views/admin/users_management.dart';
 import 'package:salesgo/views/agent/agent_home_screen.dart';
 import 'package:salesgo/views/agent/history_screen.dart';
 import 'package:salesgo/views/agent/stock_screen.dart';
