@@ -3,10 +3,10 @@ lib/
 ├── firebase_options.dart
 ├── main.dart
 ├── models/
-│   ├── car.dart
 │   ├── category.dart
 │   ├── coupon.dart
 │   ├── discount.dart
+│   ├── location.dart
 │   ├── product.dart
 │   ├── sale.dart
 │   └── user.dart
@@ -24,11 +24,11 @@ lib/
 ├── views/
 │   ├── admin/
 │   │   ├── admin_home_screen.dart
-│   │   ├── car_management.dart
+│   │   ├── location_management.dart
 │   │   ├── product_management.dart
 │   │   ├── reports_screen.dart
 │   │   ├── stock_management.dart
-│   │   └── users_screen.dart
+│   │   └── users_management.dart
 │   ├── agent/
 │   │   ├── agent_home_screen.dart
 │   │   ├── history_screen.dart
@@ -48,7 +48,7 @@ app.dart:
 # app.dart
 import 'package:flutter/material.dart';
 import 'package:salesgo/views/admin/admin_home_screen.dart';
-import 'package:salesgo/views/admin/users_screen.dart';
+import 'package:salesgo/views/admin/users_management.dart';
 import 'package:salesgo/views/agent/agent_home_screen.dart';
 import 'package:salesgo/views/agent/history_screen.dart';
 import 'package:salesgo/views/agent/stock_screen.dart';
@@ -181,7 +181,7 @@ import 'package:salesgo/viewmodels/discount_vm.dart';
 import 'package:salesgo/viewmodels/sales_vm.dart';
 import 'package:salesgo/viewmodels/stock_vm.dart';
 import 'package:salesgo/views/admin/admin_home_screen.dart';
-import 'package:salesgo/views/admin/users_screen.dart';
+import 'package:salesgo/views/admin/users_management.dart';
 import 'package:salesgo/views/agent/agent_home_screen.dart';
 import 'package:salesgo/views/agent/history_screen.dart';
 import 'package:salesgo/views/agent/stock_screen.dart';
@@ -268,7 +268,7 @@ import 'views/admin/admin_home_screen.dart';
 import 'views/agent/agent_home_screen.dart';
 import 'views/agent/history_screen.dart';
 import 'views/agent/stock_screen.dart';
-import 'views/admin/users_screen.dart';
+import 'views/admin/users_management.dart';
 
 final appRoutes = {
   '/history': (context) => const HistoryScreen(),
@@ -279,39 +279,6 @@ final appRoutes = {
   '/reports': (context) => const ReportsScreen(),
 
 };
-
-models\car.dart:
-
-# models\car.dart
-class Car {
-  final String id;
-  final String name;
-  final String plateNumber;
-  final String? assignedAgentId;
-
-  Car({
-    required this.id,
-    required this.name,
-    required this.plateNumber,
-    this.assignedAgentId,
-  });
-
-  factory Car.fromFirestore(Map<String, dynamic> data) {
-    return Car(
-      id: data['id'],
-      name: data['name'],
-      plateNumber: data['plateNumber'],
-      assignedAgentId: data['assignedAgentId'],
-    );
-  }
-
-  Map<String, dynamic> toMap() => {
-    'id': id,
-    'name': name,
-    'plateNumber': plateNumber,
-    'assignedAgentId': assignedAgentId,
-  };
-}
 
 models\category.dart:
 
@@ -417,6 +384,39 @@ class Discount {
     'endDate': endDate,
     'value': value,
     'type': type,
+  };
+}
+
+models\location.dart:
+
+# models\location.dart
+class Location {
+  final String id;
+  final String name;
+  final String type; // Added location type
+  final String? assignedAgentId;
+
+  Location({
+    required this.id,
+    required this.name,
+    required this.type,
+    this.assignedAgentId,
+  });
+
+  factory Location.fromFirestore(Map<String, dynamic> data) {
+    return Location(
+      id: data['id'],
+      name: data['name'],
+      type: data['type'] ?? 'van', // Default type
+      assignedAgentId: data['assignedAgentId'],
+    );
+  }
+
+  Map<String, dynamic> toMap() => {
+    'id': id,
+    'name': name,
+    'type': type,
+    'assignedAgentId': assignedAgentId,
   };
 }
 
@@ -540,14 +540,14 @@ class AppUser {
   final String uid;
   final String email;
   final String role;
-  final String? assignedCarId;
+  final String? assignedLocationId;
   final String name;
 
   AppUser({
     required this.uid,
     required this.email,
     required this.role,
-    this.assignedCarId,
+    this.assignedLocationId,
     required this.name,
   });
 
@@ -556,8 +556,8 @@ class AppUser {
       uid: data['uid'] ?? '',
       email: data['email'] ?? '',
       role: data['role'] ?? 'agent',
-      assignedCarId: data['assignedCarId'],
-      name: data['name'] ?? 'Unknown',
+      assignedLocationId: data['assignedLocationId'],
+      name: data['name'] ?? 'Agent Name',
     );
   }
 
@@ -565,7 +565,7 @@ class AppUser {
     'uid': uid,
     'email': email,
     'role': role,
-    'assignedCarId': assignedCarId,
+    'assignedLocationId': assignedLocationId,
     'name': name,
   };
 
@@ -1300,9 +1300,9 @@ views\admin\admin_home_screen.dart:
 # views\admin\admin_home_screen.dart
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:salesgo/views/admin/car_management.dart';
+import 'package:salesgo/views/admin/location_management.dart';
 import 'package:salesgo/views/admin/product_management.dart';
-import 'users_screen.dart';
+import 'users_management.dart';
 import 'stock_management.dart';
 import 'reports_screen.dart';
 import '../../viewmodels/auth_vm.dart';
@@ -1320,7 +1320,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
   static const List<Widget> _adminScreens = [
     UsersScreen(),
     ProductManagement(),
-    CarManagement(),
+    LocationManagement(),
     StockManagement(),
     ReportsScreen(),
   ];
@@ -1359,14 +1359,14 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.shopping_bag),
-            label: 'Produits',
+            label: 'Products',
           ),
           BottomNavigationBarItem(
-            icon: Icon(Icons.directions_car),
-            label: 'Véhicules',
+            icon: Icon(Icons.map),
+            label: 'Locations',
           ),
           BottomNavigationBarItem(
-            icon: Icon(Icons.inventory),
+            icon: Icon(Icons.warehouse_outlined),
             label: 'Stock',
           ),
           BottomNavigationBarItem(
@@ -1381,44 +1381,44 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
   }
 }
 
-views\admin\car_management.dart:
+views\admin\location_management.dart:
 
-# views\admin\car_management.dart
+# views\admin\location_management.dart
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:salesgo/models/car.dart';
+import 'package:salesgo/models/location.dart';
 import 'package:salesgo/models/user.dart';
 
-class CarManagement extends StatefulWidget {
-  const CarManagement({super.key});
+class LocationManagement extends StatefulWidget {
+  const LocationManagement({super.key});
 
   @override
-  _CarManagementState createState() => _CarManagementState();
+  _LocationManagementState createState() => _LocationManagementState();
 }
 
-class _CarManagementState extends State<CarManagement> {
+class _LocationManagementState extends State<LocationManagement> {
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
-  final _plateController = TextEditingController();
+  String _selectedType = 'van';
   String? _selectedAgentId;
 
-  Future<void> _addCar() async {
+  Future<void> _addLocation() async {
     if (_formKey.currentState!.validate()) {
       try {
-        final car = Car(
-          id: FirebaseFirestore.instance.collection('cars').doc().id,
+        final location = Location(
+          id: FirebaseFirestore.instance.collection('locations').doc().id,
           name: _nameController.text,
-          plateNumber: _plateController.text,
+          type: _selectedType,
           assignedAgentId: _selectedAgentId,
         );
 
         await FirebaseFirestore.instance
-            .collection('cars')
-            .doc(car.id)
-            .set(car.toMap());
+            .collection('locations')
+            .doc(location.id)
+            .set(location.toMap());
 
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Car added successfully')),
+          const SnackBar(content: Text('Location added successfully')),
         );
 
         // Clear form
@@ -1426,7 +1426,7 @@ class _CarManagementState extends State<CarManagement> {
         setState(() => _selectedAgentId = null);
       } catch (e) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error adding car: $e')),
+          SnackBar(content: Text('Error adding location: $e')),
         );
       }
     }
@@ -1435,7 +1435,7 @@ class _CarManagementState extends State<CarManagement> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Car Management')),
+      appBar: AppBar(title: const Text('Location Management')),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Form(
@@ -1444,13 +1444,19 @@ class _CarManagementState extends State<CarManagement> {
             children: [
               TextFormField(
                 controller: _nameController,
-                decoration: const InputDecoration(labelText: 'Car Name'),
+                decoration: const InputDecoration(labelText: 'Location Name'),
                 validator: (value) => value!.isEmpty ? 'Required' : null,
               ),
-              TextFormField(
-                controller: _plateController,
-                decoration: const InputDecoration(labelText: 'Plate Number'),
-                validator: (value) => value!.isEmpty ? 'Required' : null,
+              const SizedBox(height: 20),
+              DropdownButtonFormField<String>(
+                value: _selectedType,
+                items: const [
+                  DropdownMenuItem(value: 'warehouse', child: Text('Warehouse')),
+                  DropdownMenuItem(value: 'store', child: Text('Store')),
+                  DropdownMenuItem(value: 'van', child: Text('Mobile Van')),
+                ],
+                onChanged: (value) => setState(() => _selectedType = value!),
+                decoration: const InputDecoration(labelText: 'Location Type'),
               ),
               const SizedBox(height: 20),
               const Text('Assign to Agent (optional)'),
@@ -1482,15 +1488,15 @@ class _CarManagementState extends State<CarManagement> {
               ),
               const SizedBox(height: 20),
               ElevatedButton(
-                onPressed: _addCar,
-                child: const Text('Add Car'),
+                onPressed: _addLocation,
+                child: const Text('Add Location'),
               ),
               const SizedBox(height: 20),
               const Divider(),
-              const Text('Existing Cars', style: TextStyle(fontSize: 18)),
+              const Text('Existing Locations', style: TextStyle(fontSize: 18)),
               const SizedBox(height: 10),
               StreamBuilder<QuerySnapshot>(
-                stream: FirebaseFirestore.instance.collection('cars').snapshots(),
+                stream: FirebaseFirestore.instance.collection('locations').snapshots(),
                 builder: (context, snapshot) {
                   if (!snapshot.hasData) {
                     return const CircularProgressIndicator();
@@ -1501,13 +1507,13 @@ class _CarManagementState extends State<CarManagement> {
                     itemCount: snapshot.data!.docs.length,
                     itemBuilder: (context, index) {
                       final doc = snapshot.data!.docs[index];
-                      final car = Car.fromFirestore(doc.data() as Map<String, dynamic>);
+                      final location = Location.fromFirestore(doc.data() as Map<String, dynamic>);
                       return ListTile(
-                        title: Text(car.name),
-                        subtitle: Text('Plate: ${car.plateNumber}'),
+                        title: Text(location.name),
+                        subtitle: Text('Type: ${location.type}'),
                         trailing: IconButton(
                           icon: const Icon(Icons.delete),
-                          onPressed: () => _deleteCar(doc.id),
+                          onPressed: () => _deleteLocation(doc.id),
                         ),
                       );
                     },
@@ -1521,15 +1527,15 @@ class _CarManagementState extends State<CarManagement> {
     );
   }
 
-  Future<void> _deleteCar(String carId) async {
+  Future<void> _deleteLocation(String locationId) async {
     try {
-      await FirebaseFirestore.instance.collection('cars').doc(carId).delete();
+      await FirebaseFirestore.instance.collection('locations').doc(locationId).delete();
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Car deleted')),
+        const SnackBar(content: Text('Location deleted')),
       );
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error deleting car: $e')),
+        SnackBar(content: Text('Error deleting location: $e')),
       );
     }
   }
@@ -1537,7 +1543,6 @@ class _CarManagementState extends State<CarManagement> {
   @override
   void dispose() {
     _nameController.dispose();
-    _plateController.dispose();
     super.dispose();
   }
 }
@@ -1571,6 +1576,7 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
   final _barcodeController = TextEditingController();
   String? _imageUrl;
   bool _isLoading = false;
+  bool _hasDateRange = false; // New flag for date range toggle
 
   // For categories
   final _categoryNameController = TextEditingController();
@@ -1758,38 +1764,48 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
     if (_discountNameController.text.isEmpty ||
         _discountValueController.text.isEmpty ||
         _discountTypeController.text.isEmpty ||
-        _selectedDiscountCategory == null ||
-        _discountStartDate == null ||
-        _discountEndDate == null) {
+        _selectedDiscountCategory == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('All fields are required')),
+        const SnackBar(content: Text('Required fields are missing')),
       );
       return;
     }
 
-    if (_discountEndDate!.isBefore(_discountStartDate!)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('End date must be after start date')),
-      );
-      return;
+    // Only validate dates if the user has enabled date range
+    if (_hasDateRange) {
+      if (_discountStartDate == null || _discountEndDate == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Date range is enabled but not set')),
+        );
+        return;
+      }
+
+      if (_discountEndDate!.isBefore(_discountStartDate!)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('End date must be after start date')),
+        );
+        return;
+      }
     }
 
     setState(() => _isLoading = true);
     try {
-      final discount = Discount(
-        id: FirebaseFirestore.instance.collection('discounts').doc().id,
-        name: _discountNameController.text,
-        category: _selectedDiscountCategory!,
-        startDate: _discountStartDate!,
-        endDate: _discountEndDate!,
-        value: double.parse(_discountValueController.text),
-        type: _discountTypeController.text,
-      );
+      final discountData = {
+        'id': FirebaseFirestore.instance.collection('discounts').doc().id,
+        'name': _discountNameController.text,
+        'category': _selectedDiscountCategory!,
+        'value': double.parse(_discountValueController.text),
+        'type': _discountTypeController.text,
+        'hasDateRange': _hasDateRange,
+        // Only store dates if range enabled
+        if (_hasDateRange) 'startDate': _discountStartDate!,
+        if (_hasDateRange) 'endDate': _discountEndDate!,
+      };
 
       await FirebaseFirestore.instance
           .collection('discounts')
-          .doc(discount.id)
-          .set(discount.toMap());
+          .doc(discountData['id'] as String?)
+          .set(discountData);
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Discount added successfully')),
@@ -1803,6 +1819,7 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
         _selectedDiscountCategory = null;
         _discountStartDate = null;
         _discountEndDate = null;
+        _hasDateRange = false;
       });
       Navigator.pop(context);
     } catch (e) {
@@ -1818,35 +1835,53 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
     if (_discountNameController.text.isEmpty ||
         _discountValueController.text.isEmpty ||
         _discountTypeController.text.isEmpty ||
-        _selectedDiscountCategory == null ||
-        _discountStartDate == null ||
-        _discountEndDate == null) {
+        _selectedDiscountCategory == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('All fields are required')),
+        const SnackBar(content: Text('Required fields are missing')),
       );
       return;
     }
 
-    if (_discountEndDate!.isBefore(_discountStartDate!)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('End date must be after start date')),
-      );
-      return;
+    // Only validate dates if date range is enabled
+    if (_hasDateRange) {
+      if (_discountStartDate == null || _discountEndDate == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Date range is enabled but dates are not set')),
+        );
+        return;
+      }
+      if (_discountEndDate!.isBefore(_discountStartDate!)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('End date must be after start date')),
+        );
+        return;
+      }
     }
 
     setState(() => _isLoading = true);
     try {
+      final updateData = {
+        'name': _discountNameController.text,
+        'category': _selectedDiscountCategory!,
+        'value': double.parse(_discountValueController.text),
+        'type': _discountTypeController.text,
+        'hasDateRange': _hasDateRange,
+      };
+
+      // Conditionally update dates
+      if (_hasDateRange) {
+        updateData['startDate'] = _discountStartDate!;
+        updateData['endDate'] = _discountEndDate!;
+      } else {
+        // Remove dates if date range is disabled
+        updateData['startDate'] = FieldValue.delete();
+        updateData['endDate'] = FieldValue.delete();
+      }
+
       await FirebaseFirestore.instance
           .collection('discounts')
           .doc(discountId)
-          .update({
-            'name': _discountNameController.text,
-            'category': _selectedDiscountCategory,
-            'startDate': _discountStartDate,
-            'endDate': _discountEndDate,
-            'value': double.parse(_discountValueController.text),
-            'type': _discountTypeController.text,
-          });
+          .update(updateData);
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Discount updated successfully')),
@@ -1859,6 +1894,30 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
     } finally {
       setState(() => _isLoading = false);
     }
+  }
+  // Update the _editDiscount method to handle the new hasDateRange field
+  Future<void> _editDiscount(DocumentSnapshot discount) async {
+    final data = discount.data() as Map<String, dynamic>;
+    _discountNameController.text = data['name'] ?? '';
+    _discountValueController.text = data['value'].toString();
+    _discountTypeController.text = data['type'];
+    _selectedDiscountCategory = data['category'];
+    
+    setState(() {
+      _hasDateRange = data['hasDateRange'] ?? false;
+      if (_hasDateRange) {
+        _discountStartDate = (data['startDate'] as Timestamp).toDate();
+        _discountEndDate = (data['endDate'] as Timestamp).toDate();
+      } else {
+        _discountStartDate = null;
+        _discountEndDate = null;
+      }
+    });
+
+    await showDialog(
+      context: context,
+      builder: (context) => _buildDiscountForm(isEditing: true, discountId: discount.id),
+    );
   }
 
   Future<void> _deleteProduct(String productId) async {
@@ -1956,21 +2015,6 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
     await showDialog(
       context: context,
       builder: (context) => _buildCategoryForm(isEditing: true, categoryId: category.id),
-    );
-  }
-
-  Future<void> _editDiscount(DocumentSnapshot discount) async {
-    final data = discount.data() as Map<String, dynamic>;
-    _discountNameController.text = data['name'] ?? '';
-    _discountValueController.text = data['value'].toString();
-    _discountTypeController.text = data['type'];
-    _selectedDiscountCategory = data['category'];
-    _discountStartDate = (data['startDate'] as Timestamp).toDate();
-    _discountEndDate = (data['endDate'] as Timestamp).toDate();
-
-    await showDialog(
-      context: context,
-      builder: (context) => _buildDiscountForm(isEditing: true, discountId: discount.id),
     );
   }
 
@@ -2123,6 +2167,8 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
     );
   }
 
+  // Update the _buildDiscountsTab method to show date range info
+  // Update the _buildDiscountsTab method to show date range info
   Widget _buildDiscountsTab() {
     return Padding(
       padding: const EdgeInsets.all(16.0),
@@ -2137,13 +2183,19 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
             itemBuilder: (context, index) {
               final doc = snapshot.data!.docs[index];
               final data = doc.data() as Map<String, dynamic>;
-              final startDate = (data['startDate'] as Timestamp).toDate();
-              final endDate = (data['endDate'] as Timestamp).toDate();
+              final hasDateRange = data['hasDateRange'] ?? false;
+              String dateText = 'No date range';
+              
+              if (hasDateRange && data['startDate'] != null && data['endDate'] != null) {
+                final startDate = (data['startDate'] as Timestamp).toDate();
+                final endDate = (data['endDate'] as Timestamp).toDate();
+                dateText = '${_formatDate(startDate)} to ${_formatDate(endDate)}';
+              }
               
               return ListTile(
                 leading: const Icon(Icons.discount),
                 title: Text('${data['name']} - ${data['value']}${data['type']} (${data['category']})'),
-                subtitle: Text('${_formatDate(startDate)} to ${_formatDate(endDate)}'),
+                subtitle: Text(dateText),
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -2278,84 +2330,133 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
     );
   }
 
+  // Update the _buildDiscountForm method
   Widget _buildDiscountForm({bool isEditing = false, String? discountId}) {
-    return AlertDialog(
-      title: Text(isEditing ? 'Edit Discount' : 'Add New Discount'),
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextFormField(
-              controller: _discountNameController,
-              decoration: const InputDecoration(labelText: 'Discount Name'),
-              validator: (value) => value!.isEmpty ? 'Required' : null,
-            ),
-            TextFormField(
-              controller: _discountValueController,
-              decoration: const InputDecoration(labelText: 'Value'),
-              keyboardType: TextInputType.number,
-              validator: (value) => value!.isEmpty ? 'Required' : null,
-            ),
-            TextFormField(
-              controller: _discountTypeController,
-              decoration: const InputDecoration(labelText: 'Type (e.g., %, \$)'),
-              validator: (value) => value!.isEmpty ? 'Required' : null,
-            ),
-            StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance.collection('categories').snapshots(),
-              builder: (context, snapshot) {
-                if (!snapshot.hasData) return const SizedBox();
-                
-                final categories = snapshot.data!.docs.map((doc) {
-                  return DropdownMenuItem<String>(
-                    value: doc['name'],
-                    child: Text(doc['name']),
-                  );
-                }).toList();
-                
-                return DropdownButtonFormField<String>(
-                  value: _selectedDiscountCategory,
-                  decoration: const InputDecoration(labelText: 'Category'),
-                  items: categories,
-                  onChanged: (value) {
-                    setState(() {
-                      _selectedDiscountCategory = value;
+    return StatefulBuilder(
+      builder: (BuildContext context, StateSetter setDialogState) {
+        return AlertDialog(
+          title: Text(isEditing ? 'Edit Discount' : 'Add New Discount'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextFormField(
+                  controller: _discountNameController,
+                  decoration: const InputDecoration(labelText: 'Discount Name'),
+                  validator: (value) => value!.isEmpty ? 'Required' : null,
+                ),
+                TextFormField(
+                  controller: _discountValueController,
+                  decoration: const InputDecoration(labelText: 'Value'),
+                  keyboardType: TextInputType.number,
+                  validator: (value) => value!.isEmpty ? 'Required' : null,
+                ),
+                TextFormField(
+                  controller: _discountTypeController,
+                  decoration: const InputDecoration(labelText: 'Type (e.g., %, \$)'),
+                  validator: (value) => value!.isEmpty ? 'Required' : null,
+                ),
+                StreamBuilder<QuerySnapshot>(
+                  stream: FirebaseFirestore.instance.collection('categories').snapshots(),
+                  builder: (context, snapshot) {
+                    if (!snapshot.hasData) return const SizedBox();
+                    
+                    final categories = snapshot.data!.docs.map((doc) {
+                      return DropdownMenuItem<String>(
+                        value: doc['name'],
+                        child: Text(doc['name']),
+                      );
+                    }).toList();
+                    
+                    return DropdownButtonFormField<String>(
+                      value: _selectedDiscountCategory,
+                      decoration: const InputDecoration(labelText: 'Category'),
+                      items: categories,
+                      onChanged: (value) {
+                        setDialogState(() {
+                          _selectedDiscountCategory = value;
+                        });
+                      },
+                      validator: (value) => value == null ? 'Please select a category' : null,
+                    );
+                  },
+                ),
+                const SizedBox(height: 10),
+                SwitchListTile(
+                  title: const Text('Date Range'),
+                  value: _hasDateRange,
+                  onChanged: (bool value) {
+                    setDialogState(() {
+                      _hasDateRange = value;
+                      if (!value) {
+                        _discountStartDate = null;
+                        _discountEndDate = null;
+                      }
                     });
                   },
-                  validator: (value) => value == null ? 'Please select a category' : null,
-                );
+                ),
+                if (_hasDateRange) ...[
+                  const SizedBox(height: 10),
+                  ListTile(
+                    title: Text(
+                      _discountStartDate == null 
+                          ? 'Select Start Date' 
+                          : 'Start: ${_formatDate(_discountStartDate!)}'
+                    ),
+                    trailing: const Icon(Icons.calendar_today),
+                    onTap: () async {
+                      final date = await showDatePicker(
+                        context: context,
+                        initialDate: DateTime.now(),
+                        firstDate: DateTime.now(),
+                        lastDate: DateTime(2101),
+                      );
+                      if (date != null) {
+                        setDialogState(() => _discountStartDate = date);
+                      }
+                    },
+                  ),
+                  ListTile(
+                    title: Text(
+                      _discountEndDate == null 
+                          ? 'Select End Date' 
+                          : 'End: ${_formatDate(_discountEndDate!)}'
+                    ),
+                    trailing: const Icon(Icons.calendar_today),
+                    onTap: () async {
+                      final date = await showDatePicker(
+                        context: context,
+                        initialDate: _discountStartDate ?? DateTime.now(),
+                        firstDate: _discountStartDate ?? DateTime.now(),
+                        lastDate: DateTime(2101),
+                      );
+                      if (date != null) {
+                        setDialogState(() => _discountEndDate = date);
+                      }
+                    },
+                  ),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                if (isEditing) {
+                  _updateDiscount(discountId!);
+                } else {
+                  _addDiscount();
+                }
               },
-            ),
-            const SizedBox(height: 10),
-            ListTile(
-              title: Text(_discountStartDate == null 
-                  ? 'Select Start Date' 
-                  : 'Start: ${_formatDate(_discountStartDate!)}'),
-              trailing: const Icon(Icons.calendar_today),
-              onTap: () => _selectStartDate(context),
-            ),
-            ListTile(
-              title: Text(_discountEndDate == null 
-                  ? 'Select End Date' 
-                  : 'End: ${_formatDate(_discountEndDate!)}'),
-              trailing: const Icon(Icons.calendar_today),
-              onTap: () => _selectEndDate(context),
+              child: Text(isEditing ? 'Update' : 'Add'),
             ),
           ],
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Cancel'),
-        ),
-        ElevatedButton(
-          onPressed: () => isEditing 
-              ? _updateDiscount(discountId!)
-              : _addDiscount(),
-          child: Text(isEditing ? 'Update' : 'Add'),
-        ),
-      ],
+        );
+      },
     );
   }
 }
@@ -2458,7 +2559,7 @@ class StockManagement extends StatefulWidget {
 }
 
 class _StockManagementState extends State<StockManagement> {
-  String? _selectedCarId;
+  String? _selectedLocationId;
   final _formKey = GlobalKey<FormState>();
   final _productController = TextEditingController();
   final _quantityController = TextEditingController();
@@ -2614,27 +2715,27 @@ class _StockManagementState extends State<StockManagement> {
                   ),
                 if (_isScanning) const SizedBox(height: 16),
                 
-                // Car Selection Dropdown
+                // Location Selection Dropdown
                 StreamBuilder<QuerySnapshot>(
-                  stream: FirebaseFirestore.instance.collection('cars').snapshots(),
+                  stream: FirebaseFirestore.instance.collection('locations').snapshots(),
                   builder: (context, snapshot) {
                     if (!snapshot.hasData) return const CircularProgressIndicator();
                     
                     return DropdownButtonFormField<String>(
-                      value: _selectedCarId,
+                      value: _selectedLocationId,
                       decoration: const InputDecoration(
-                        labelText: 'Select Car',
+                        labelText: 'Select Location',
                         border: OutlineInputBorder(),
                       ),
                       items: snapshot.data!.docs.map((doc) {
-                        final car = doc.data() as Map<String, dynamic>;
+                        final location = doc.data() as Map<String, dynamic>;
                         return DropdownMenuItem<String>(
                           value: doc.id,
-                          child: Text('${car['name']} (${car['plateNumber']})'),
+                          child: Text('${location['name']} (${location['type']})'),
                         );
                       }).toList(),
-                      onChanged: (value) => setState(() => _selectedCarId = value),
-                      validator: (value) => value == null ? 'Please select a car' : null,
+                      onChanged: (value) => setState(() => _selectedLocationId = value),
+                      validator: (value) => value == null ? 'Please select a location' : null,
                     );
                   },
                 ),
@@ -2795,8 +2896,8 @@ class _StockManagementState extends State<StockManagement> {
                                   return FutureBuilder(
                                     future: Future.wait([
                                       FirebaseFirestore.instance
-                                          .collection('cars')
-                                          .doc(data['carId'])
+                                          .collection('locations')
+                                          .doc(data['locationId'])
                                           .get(),
                                       FirebaseFirestore.instance
                                           .collection('products')
@@ -2814,7 +2915,7 @@ class _StockManagementState extends State<StockManagement> {
                                         );
                                       }
                                       
-                                      final car = snapshot.data![0].data() as Map<String, dynamic>? ?? {};
+                                      final location = snapshot.data![0].data() as Map<String, dynamic>? ?? {};
                                       final product = snapshot.data![1].data() as Map<String, dynamic>? ?? {};
                                       final admin = snapshot.data![2].data() as Map<String, dynamic>? ?? {};
                                       
@@ -2825,7 +2926,7 @@ class _StockManagementState extends State<StockManagement> {
                                           subtitle: Column(
                                             crossAxisAlignment: CrossAxisAlignment.start,
                                             children: [
-                                              Text('Car: ${car['name']} (${car['plateNumber']})'),
+                                              Text('Location: ${location['name']} (${location['type']})'),
                                               Text('Quantity: ${data['quantity']}'),
                                               Text('Admin: ${admin['email']}'),
                                             ],
@@ -2858,9 +2959,9 @@ class _StockManagementState extends State<StockManagement> {
   }
 
   Future<void> _assignStock() async {
-    if (_selectedCarId == null) {
+    if (_selectedLocationId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please select a car')),
+        const SnackBar(content: Text('Please select a location')),
       );
       return;
     }
@@ -2880,14 +2981,14 @@ class _StockManagementState extends State<StockManagement> {
       try {
         // Update stock
         await FirebaseFirestore.instance
-            .collection('cars/$_selectedCarId/stock')
+            .collection('locations/$_selectedLocationId/stock')
             .doc(productId)
             .set({'quantity': quantity});
 
         // Record history if admin
         if (authVM.userRole == 'admin') {
           await FirebaseFirestore.instance.collection('stockHistory').add({
-            'carId': _selectedCarId,
+            'locationId': _selectedLocationId,
             'productId': productId,
             'quantity': quantity,
             'timestamp': DateTime.now(),
@@ -2913,9 +3014,9 @@ class _StockManagementState extends State<StockManagement> {
   }
 }
 
-views\admin\users_screen.dart:
+views\admin\users_management.dart:
 
-# views\admin\users_screen.dart
+# views\admin\users_management.dart
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:provider/provider.dart';
@@ -2929,7 +3030,7 @@ class UsersScreen extends StatelessWidget {
     Provider.of<AuthViewModel>(context);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Gestion des Agents')),
+      appBar: AppBar(title: const Text('Agent Management')),
       floatingActionButton: FloatingActionButton(
         child: const Icon(Icons.add),
         onPressed: () => _createNewUser(context),
@@ -3000,9 +3101,9 @@ class _AgentHomeScreenState extends State<AgentHomeScreen> {
       final discountVM = context.read<DiscountViewModel>();
       final authVM = context.read<AuthViewModel>();
       
-      // Load stock for the assigned car (if any)
-      if (authVM.currentUser?.assignedCarId != null) {
-        stockVM.loadStock(authVM.currentUser!.assignedCarId!);
+      // Load stock for the assigned location (if any)
+      if (authVM.currentUser?.assignedLocationId != null) {
+        stockVM.loadStock(authVM.currentUser!.assignedLocationId!);
       }
       
       // Load active discounts
@@ -3065,11 +3166,56 @@ views\agent\history_screen.dart:
 
 # views\agent\history_screen.dart
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:salesgo/models/product.dart';
 import 'package:salesgo/models/sale.dart';
+import 'package:salesgo/models/discount.dart';
 import '../../viewmodels/auth_vm.dart';
 import '../../widgets/sale_item.dart';
+
+class ProductSalesData {
+  List<Sale> sales;
+  int totalQuantity;
+  double totalAmount;
+  final Product product;
+
+  ProductSalesData({
+    required this.product,
+    List<Sale>? sales,
+    this.totalQuantity = 0,
+    this.totalAmount = 0.0,
+  }) : sales = sales ?? []; // Initialize with modifiable list
+}
+
+class CategorySalesData {
+  final List<Sale> sales;
+  int totalQuantity;
+  double totalAmount;
+  final String category;
+
+  CategorySalesData({
+    required this.category,
+    List<Sale>? sales,
+    this.totalQuantity = 0,
+    this.totalAmount = 0.0,
+  }): sales = sales ?? [];
+}
+
+class DiscountSalesData {
+  final List<Sale> sales;
+  int totalQuantity;
+  double totalAmount;
+  final String discountName;
+
+  DiscountSalesData({
+    required this.discountName,
+    List<Sale>? sales,
+    this.totalQuantity = 0,
+    this.totalAmount = 0.0,
+  }): sales = sales ?? [];
+}
 
 class HistoryScreen extends StatefulWidget {
   const HistoryScreen({super.key});
@@ -3079,7 +3225,8 @@ class HistoryScreen extends StatefulWidget {
 }
 
 class _HistoryScreenState extends State<HistoryScreen> {
-  String _selectedFilter = 'week';
+  String _selectedFilter = 'day';
+  String _groupBy = 'product'; // 'none', 'product', 'payment', 'category', 'discount'
   late DateTimeRange _dateRange;
 
   @override
@@ -3128,14 +3275,44 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Historique des Ventes'),
+        title: const Text('Sales History'),
         actions: [
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.filter_list),
+            onSelected: (value) {
+              setState(() {
+                _groupBy = value;
+              });
+            },
+            itemBuilder: (context) => [
+              const PopupMenuItem(
+                value: 'none',
+                child: Text('No grouping'),
+              ),
+              const PopupMenuItem(
+                value: 'product',
+                child: Text('Group by product'),
+              ),
+              const PopupMenuItem(
+                value: 'category',
+                child: Text('Group by category'),
+              ),
+              const PopupMenuItem(
+                value: 'discount',
+                child: Text('Group by discount'),
+              ),
+              const PopupMenuItem(
+                value: 'payment',
+                child: Text('Group by payment method'),
+              ),
+            ],
+          ),
           DropdownButton<String>(
             value: _selectedFilter,
             items: const [
               DropdownMenuItem(value: 'day', child: Text('Today')),
-              DropdownMenuItem(value: 'week', child: Text('Current Week')),
-              DropdownMenuItem(value: 'month', child: Text('Current Month')),
+              DropdownMenuItem(value: 'week', child: Text('This Week')),
+              DropdownMenuItem(value: 'month', child: Text('This Month')),
             ],
             onChanged: (value) {
               if (value != null) {
@@ -3166,7 +3343,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
           }
 
           if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-            return const Center(child: Text('Aucune vente trouvée'));
+            return const Center(child: Text('No sales found'));
           }
 
           final sales = snapshot.data!.docs.map((doc) {
@@ -3178,13 +3355,241 @@ class _HistoryScreenState extends State<HistoryScreen> {
             }
           }).whereType<Sale>().toList();
 
-          return ListView.builder(
-            itemCount: sales.length,
-            itemBuilder: (context, index) => SaleItem(sale: sales[index]),
-          );
+          switch (_groupBy) {
+            case 'none':
+              return _buildSalesList(sales);
+            case 'product':
+              return _buildGroupedByProduct(sales);
+            case 'category':
+              return _buildGroupedByCategory(sales);
+            case 'discount':
+              return _buildGroupedByDiscount(sales);
+            case 'payment':
+              return _buildGroupedByPayment(sales);
+            default:
+              return _buildSalesList(sales);
+          }
         },
       ),
     );
+  }
+
+  Widget _buildSalesList(List<Sale> sales) {
+    return ListView.builder(
+      itemCount: sales.length,
+      itemBuilder: (context, index) => SaleItem(sale: sales[index]),
+    );
+  }
+
+  Widget _buildGroupedByProduct(List<Sale> sales) {
+    final productGroups = <String, ProductSalesData>{};
+    
+    for (final sale in sales) {
+      for (final product in sale.products) {
+        if (!productGroups.containsKey(product.id)) {
+          productGroups[product.id] = ProductSalesData(
+            product: product,
+            sales: [], // Explicitly create new modifiable list
+          );
+        }
+        
+        final quantityInSale = sale.products.where((p) => p.id == product.id).length;
+        productGroups[product.id]!.sales.add(sale); // Now this will work
+        productGroups[product.id]!.totalQuantity += quantityInSale;
+        productGroups[product.id]!.totalAmount += product.price * quantityInSale;
+      }
+    }
+
+    return ListView(
+      children: productGroups.entries.map((entry) {
+        final data = entry.value;
+        
+        return ExpansionTile(
+          leading: data.product.imageUrl != null 
+              ? Image.network(data.product.imageUrl!, width: 40, height: 40)
+              : const Icon(Icons.shopping_bag),
+          title: Text(data.product.name),
+          subtitle: Text('${data.totalQuantity} items - Total: €${data.totalAmount.toStringAsFixed(2)}'),
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Category: ${data.product.category}'),
+                  Text('Unit price: €${data.product.price.toStringAsFixed(2)}'),
+                  const SizedBox(height: 8),
+                  const Text('Recent sales:', style: TextStyle(fontWeight: FontWeight.bold)),
+                  ...data.sales.take(3).map((sale) {
+                    final quantityInSale = sale.products.where((p) => p.id == data.product.id).length;
+                    return ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text('Sale #${sale.id.substring(0, 6)}'),
+                      subtitle: Text(DateFormat('MMM dd, HH:mm').format(sale.date)),
+                      trailing: Text('$quantityInSale × €${data.product.price.toStringAsFixed(2)}'),
+                    );
+                  }).toList(),
+                  if (data.sales.length > 3)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8.0),
+                      child: Text('+ ${data.sales.length - 3} more transactions',
+                          style: TextStyle(color: Colors.grey[600])),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        );
+      }).toList(),
+    );
+  }
+
+  Widget _buildGroupedByCategory(List<Sale> sales) {
+    final categoryGroups = <String, CategorySalesData>{};
+    
+    for (final sale in sales) {
+      for (final product in sale.products) {
+        if (!categoryGroups.containsKey(product.category)) {
+          categoryGroups[product.category] = CategorySalesData(category: product.category);
+        }
+        
+        final quantityInSale = sale.products.where((p) => p.category == product.category).length;
+        categoryGroups[product.category]!.sales.add(sale);
+        categoryGroups[product.category]!.totalQuantity += quantityInSale;
+        categoryGroups[product.category]!.totalAmount += product.price * quantityInSale;
+      }
+    }
+
+    return ListView(
+      children: categoryGroups.entries.map((entry) {
+        final data = entry.value;
+        
+        return ExpansionTile(
+          leading: const Icon(Icons.category),
+          title: Text(data.category),
+          subtitle: Text('${data.totalQuantity} items - Total: €${data.totalAmount.toStringAsFixed(2)}'),
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Top products:', style: TextStyle(fontWeight: FontWeight.bold)),
+                  ..._getTopProductsInCategory(sales, data.category).take(3).map((product) {
+                    return ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(product.name),
+                      trailing: Text('€${product.price.toStringAsFixed(2)}'),
+                    );
+                  }).toList(),
+                  const SizedBox(height: 8),
+                  const Text('Recent sales:', style: TextStyle(fontWeight: FontWeight.bold)),
+                  ...data.sales.take(3).map((sale) {
+                    return ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text('Sale #${sale.id.substring(0, 6)}'),
+                      subtitle: Text(DateFormat('MMM dd, HH:mm').format(sale.date)),
+                      trailing: Text('€${sale.totalAmount.toStringAsFixed(2)}'),
+                    );
+                  }).toList(),
+                ],
+              ),
+            ),
+          ],
+        );
+      }).toList(),
+    );
+  }
+
+  Widget _buildGroupedByDiscount(List<Sale> sales) {
+    final discountGroups = <String, DiscountSalesData>{};
+    
+    for (final sale in sales) {
+      final discountName = sale.couponCode ?? 'No discount';
+      if (!discountGroups.containsKey(discountName)) {
+        discountGroups[discountName] = DiscountSalesData(discountName: discountName);
+      }
+      
+      discountGroups[discountName]!.sales.add(sale);
+      discountGroups[discountName]!.totalQuantity += sale.products.length;
+      discountGroups[discountName]!.totalAmount += sale.totalAmount;
+    }
+
+    return ListView(
+      children: discountGroups.entries.map((entry) {
+        final data = entry.value;
+        
+        return ExpansionTile(
+          leading: const Icon(Icons.discount),
+          title: Text(data.discountName),
+          subtitle: Text('${data.totalQuantity} items - Total: €${data.totalAmount.toStringAsFixed(2)}'),
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Recent sales:', style: TextStyle(fontWeight: FontWeight.bold)),
+                  ...data.sales.take(3).map((sale) {
+                    return ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text('Sale #${sale.id.substring(0, 6)}'),
+                      subtitle: Text(DateFormat('MMM dd, HH:mm').format(sale.date)),
+                      trailing: Text('€${sale.totalAmount.toStringAsFixed(2)}'),
+                    );
+                  }).toList(),
+                ],
+              ),
+            ),
+          ],
+        );
+      }).toList(),
+    );
+  }
+
+  Widget _buildGroupedByPayment(List<Sale> sales) {
+    final paymentGroups = <String, List<Sale>>{};
+    for (final sale in sales) {
+      paymentGroups.putIfAbsent(sale.paymentMethod, () => []).add(sale);
+    }
+
+    return ListView(
+      children: paymentGroups.entries.map((entry) {
+        final paymentMethod = entry.key;
+        final paymentSales = entry.value;
+        final totalAmount = paymentSales.fold<double>(0, (sum, sale) => sum + sale.totalAmount);
+
+        return ExpansionTile(
+          title: Text(paymentMethod.toUpperCase()),
+          subtitle: Text('${paymentSales.length} sales - Total: €${totalAmount.toStringAsFixed(2)}'),
+          children: paymentSales.map((sale) {
+            return ListTile(
+              title: Text('Sale #${sale.id.substring(0, 8)}'),
+              subtitle: Text(DateFormat('dd/MM/yy HH:mm').format(sale.date)),
+              trailing: Text('€${sale.totalAmount.toStringAsFixed(2)}'),
+            );
+          }).toList(),
+        );
+      }).toList(),
+    );
+  }
+
+  List<Product> _getTopProductsInCategory(List<Sale> sales, String category) {
+    final productCounts = <Product, int>{};
+    
+    for (final sale in sales) {
+      for (final product in sale.products.where((p) => p.category == category)) {
+        productCounts[product] = (productCounts[product] ?? 0) + 1;
+      }
+    }
+    
+    // Convert to list of entries
+    final sortedEntries = productCounts.entries.toList()
+      // Sort in descending order of count
+      ..sort((a, b) => b.value.compareTo(a.value));
+    
+    // Extract just the Product objects
+    return sortedEntries.map((entry) => entry.key).toList();
   }
 }
 
@@ -3413,7 +3818,7 @@ class StockScreen extends StatefulWidget {
 }
 
 class _StockScreenState extends State<StockScreen> {
-  int _selectedTabIndex = 0; // 0 for current stock, 1 for history
+  int _selectedTabIndex = 0;
 
   @override
   void initState() {
@@ -3427,8 +3832,8 @@ class _StockScreenState extends State<StockScreen> {
     final authVM = Provider.of<AuthViewModel>(context, listen: false);
     final stockVM = Provider.of<StockViewModel>(context, listen: false);
     
-    if (authVM.currentUser?.assignedCarId != null) {
-      stockVM.loadStock(authVM.currentUser!.assignedCarId!);
+    if (authVM.currentUser?.assignedLocationId != null) {
+      stockVM.loadStock(authVM.currentUser!.assignedLocationId!);
     }
   }
 
@@ -3456,17 +3861,15 @@ class _StockScreenState extends State<StockScreen> {
   }
 
   Widget _buildBody(AuthViewModel authVM, StockViewModel stockVM) {
-    // No user logged in
     if (authVM.currentUser == null) {
       return const Center(child: Text('Please log in'));
     }
 
-    // No car assigned
-    if (authVM.currentUser!.assignedCarId == null) {
+    if (authVM.currentUser!.assignedLocationId == null) {
       return Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Text('No car assigned to you'),
+          const Text('No location assigned to you'),
           const SizedBox(height: 20),
           ElevatedButton(
             onPressed: _loadData,
@@ -3474,7 +3877,7 @@ class _StockScreenState extends State<StockScreen> {
           ),
           const SizedBox(height: 20),
           Text(
-            'Please contact your administrator to assign a vehicle',
+            'Please contact your administrator to assign a location',
             style: Theme.of(context).textTheme.bodySmall,
             textAlign: TextAlign.center,
           ),
@@ -3482,18 +3885,29 @@ class _StockScreenState extends State<StockScreen> {
       );
     }
 
-    return TabBarView(
-      children: [
-        // Current Stock Tab
-        _buildCurrentStockTab(stockVM),
+    return FutureBuilder<DocumentSnapshot>(
+      future: FirebaseFirestore.instance
+          .collection('locations')
+          .doc(authVM.currentUser!.assignedLocationId)
+          .get(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) {
+          return const Center(child: CircularProgressIndicator());
+        }
+
+        final location = snapshot.data!.data() as Map<String, dynamic>? ?? {};
         
-        // Stock History Tab
-        _buildStockHistoryTab(authVM),
-      ],
+        return TabBarView(
+          children: [
+            _buildCurrentStockTab(stockVM, location),
+            _buildStockHistoryTab(authVM, location),
+          ],
+        );
+      },
     );
   }
 
-  Widget _buildCurrentStockTab(StockViewModel stockVM) {
+  Widget _buildCurrentStockTab(StockViewModel stockVM, Map<String, dynamic> location) {
     if (stockVM.isLoading) {
       return const Center(child: CircularProgressIndicator());
     }
@@ -3502,7 +3916,7 @@ class _StockScreenState extends State<StockScreen> {
       return Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Text('No stock available for your assigned vehicle'),
+          Text('No stock available at ${location['name']} (${location['type']})'),
           const SizedBox(height: 20),
           ElevatedButton(
             onPressed: _loadData,
@@ -3566,16 +3980,11 @@ class _StockScreenState extends State<StockScreen> {
     );
   }
 
-  Widget _buildStockHistoryTab(AuthViewModel authVM) {
-    final carId = authVM.currentUser?.assignedCarId;
-    if (carId == null) {
-      return const Center(child: Text('No car assigned'));
-    }
-
+  Widget _buildStockHistoryTab(AuthViewModel authVM, Map<String, dynamic> location) {
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance
           .collection('stockHistory')
-          .where('carId', isEqualTo: carId)
+          .where('locationId', isEqualTo: authVM.currentUser!.assignedLocationId)
           .orderBy('timestamp', descending: true)
           .snapshots(),
       builder: (context, snapshot) {
@@ -3600,7 +4009,9 @@ class _StockScreenState extends State<StockScreen> {
         }
 
         if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-          return const Center(child: Text('No stock history available for your vehicle'));
+          return Center(
+            child: Text('No stock history at ${location['name']}'),
+          );
         }
 
         return ListView.builder(
@@ -3632,8 +4043,7 @@ class _StockScreenState extends State<StockScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text('Quantity: ${data['quantity']}'),
-                    if (data.containsKey('adminName'))
-                      Text('Updated by: ${data['adminName']}'),
+                    Text('Location: ${location['name']} (${location['type']})'),
                     Text(
                       DateFormat('dd/MM/yyyy HH:mm').format(
                         (data['timestamp'] as Timestamp).toDate(),
