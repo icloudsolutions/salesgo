@@ -1,9 +1,12 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+
 class AppUser {
   final String uid;
   final String email;
   final String role;
   final String? assignedLocationId;
   final String name;
+  final DateTime createdAt;
 
   AppUser({
     required this.uid,
@@ -11,6 +14,7 @@ class AppUser {
     required this.role,
     this.assignedLocationId,
     required this.name,
+    required this.createdAt,
   });
 
   factory AppUser.fromFirestore(Map<String, dynamic> data) {
@@ -20,6 +24,7 @@ class AppUser {
       role: data['role'] ?? 'agent',
       assignedLocationId: data['assignedLocationId'],
       name: data['name'] ?? 'Agent Name',
+      createdAt: (data['createdAt'] as Timestamp).toDate(),
     );
   }
 
@@ -29,6 +34,7 @@ class AppUser {
     'role': role,
     'assignedLocationId': assignedLocationId,
     'name': name,
+    'createdAt': createdAt,
   };
 
 }

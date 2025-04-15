@@ -188,15 +188,39 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
 
     setState(() => _isLoading = true);
     try {
-      await FirebaseFirestore.instance
-          .collection('categories')
-          .doc(categoryId)
-          .update({
-            'name': _categoryNameController.text,
-          });
+      final categoryRef = FirebaseFirestore.instance.collection('categories').doc(categoryId);
+      final oldName = (await categoryRef.get()).data()?['name'];
+      final newName = _categoryNameController.text;
+
+      // 1. First update the category name
+      await categoryRef.update({'name': newName});
+
+      // 2. Update all products in this category
+      final productsQuery = await FirebaseFirestore.instance
+          .collection('products')
+          .where('category', isEqualTo: oldName)
+          .get();
+
+      final batch = FirebaseFirestore.instance.batch();
+      for (final doc in productsQuery.docs) {
+        batch.update(doc.reference, {'category': newName});
+      }
+
+      // 3. Update all discounts for this category
+      final discountsQuery = await FirebaseFirestore.instance
+          .collection('discounts')
+          .where('category', isEqualTo: oldName)
+          .get();
+
+      for (final doc in discountsQuery.docs) {
+        batch.update(doc.reference, {'category': newName});
+      }
+
+      // Commit all updates in a single batch
+      await batch.commit();
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Category updated successfully')),
+        const SnackBar(content: Text('Category and related items updated successfully')),
       );
       Navigator.pop(context);
     } catch (e) {

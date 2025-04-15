@@ -24,8 +24,8 @@ class FirestoreService {
   }
 
   // Stocks
-  Stream<Map<String, int>> getCarStock(String carId) {
-    return _firestore.collection('cars/$carId/stock')
+  Stream<Map<String, int>> getLocationStock(String locationId) {
+    return _firestore.collection('locations/$locationId/stock')
       .snapshots()
       .map((snapshot) => {
         for (var doc in snapshot.docs)

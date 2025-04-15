@@ -13,15 +13,20 @@ class StockScreen extends StatefulWidget {
   State<StockScreen> createState() => _StockScreenState();
 }
 
-class _StockScreenState extends State<StockScreen> {
-  int _selectedTabIndex = 0;
+class _StockScreenState extends State<StockScreen> with SingleTickerProviderStateMixin {
+  late TabController _tabController;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _loadData();
-    });
+    _tabController = TabController(length: 2, vsync: this);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadData());
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadData() async {
@@ -35,90 +40,106 @@ class _StockScreenState extends State<StockScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return DefaultTabController(
-      length: 2,
-      child: Scaffold(
-        appBar: AppBar(
-          title: const Text('Stock Management'),
-          bottom: const TabBar(
-            tabs: [
-              Tab(text: 'Current Stock'),
-              Tab(text: 'Stock History'),
-            ],
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Stock Management'),
+        bottom: TabBar(
+          controller: _tabController,
+          tabs: const [
+            Tab(icon: Icon(Icons.inventory)), 
+            Tab(icon: Icon(Icons.history)),
+        ],
+        ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: _loadData,
           ),
-        ),
-        body: Consumer2<AuthViewModel, StockViewModel>(
-          builder: (context, authVM, stockVM, _) {
-            return _buildBody(authVM, stockVM);
-          },
-        ),
+        ],
+      ),
+      body: Consumer2<AuthViewModel, StockViewModel>(
+        builder: (context, authVM, stockVM, _) {
+          if (authVM.currentUser == null) {
+            return const Center(child: Text('Please log in'));
+          }
+
+          if (authVM.currentUser!.assignedLocationId == null) {
+            return _buildNoLocationAssigned(authVM);
+          }
+
+          return TabBarView(
+            controller: _tabController,
+            children: [
+              _buildCurrentStockTab(stockVM, authVM),
+              _buildStockHistoryTab(authVM),
+            ],
+          );
+        },
       ),
     );
   }
 
-  Widget _buildBody(AuthViewModel authVM, StockViewModel stockVM) {
-    if (authVM.currentUser == null) {
-      return const Center(child: Text('Please log in'));
-    }
-
-    if (authVM.currentUser!.assignedLocationId == null) {
-      return Column(
+  Widget _buildNoLocationAssigned(AuthViewModel authVM) {
+    return Center(
+      child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Text('No location assigned to you'),
-          const SizedBox(height: 20),
+          const Icon(Icons.location_off, size: 64, color: Colors.grey),
+          const SizedBox(height: 16),
+          const Text('No location assigned'),
+          const SizedBox(height: 8),
+          Text(
+            'Contact your administrator to assign a location',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          const SizedBox(height: 16),
           ElevatedButton(
-            onPressed: _loadData,
+            onPressed:_loadData,
             child: const Text('Refresh'),
           ),
-          const SizedBox(height: 20),
-          Text(
-            'Please contact your administrator to assign a location',
-            style: Theme.of(context).textTheme.bodySmall,
-            textAlign: TextAlign.center,
-          ),
         ],
-      );
-    }
-
-    return FutureBuilder<DocumentSnapshot>(
-      future: FirebaseFirestore.instance
-          .collection('locations')
-          .doc(authVM.currentUser!.assignedLocationId)
-          .get(),
-      builder: (context, snapshot) {
-        if (!snapshot.hasData) {
-          return const Center(child: CircularProgressIndicator());
-        }
-
-        final location = snapshot.data!.data() as Map<String, dynamic>? ?? {};
-        
-        return TabBarView(
-          children: [
-            _buildCurrentStockTab(stockVM, location),
-            _buildStockHistoryTab(authVM, location),
-          ],
-        );
-      },
+      ),
     );
   }
 
-  Widget _buildCurrentStockTab(StockViewModel stockVM, Map<String, dynamic> location) {
+  Widget _buildCurrentStockTab(StockViewModel stockVM, AuthViewModel authVM) {
     if (stockVM.isLoading) {
       return const Center(child: CircularProgressIndicator());
     }
 
     if (stockVM.stock.isEmpty) {
-      return Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Text('No stock available at ${location['name']} (${location['type']})'),
-          const SizedBox(height: 20),
-          ElevatedButton(
-            onPressed: _loadData,
-            child: const Text('Refresh'),
-          ),
-        ],
+      return FutureBuilder<DocumentSnapshot>(
+        future: FirebaseFirestore.instance
+            .collection('locations')
+            .doc(authVM.currentUser!.assignedLocationId)
+            .get(),
+        builder: (context, snapshot) {
+          if (!snapshot.hasData) {
+            return const Center(child: CircularProgressIndicator());
+          }
+
+          final location = snapshot.data!.data() as Map<String, dynamic>? ?? {};
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.inventory_2, size: 64, color: Colors.grey),
+                const SizedBox(height: 16),
+                Text(
+                  'No stock available at ${location['name']}',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 8),
+                const Text('Scan products to add stock'),
+                const SizedBox(height: 16),
+                ElevatedButton(
+                  onPressed: _loadData,
+                  child: const Text('Refresh'),
+                ),
+              ],
+            ),
+          );
+        },
       );
     }
 
@@ -128,6 +149,8 @@ class _StockScreenState extends State<StockScreen> {
         itemCount: stockVM.stock.keys.length,
         itemBuilder: (context, index) {
           final productId = stockVM.stock.keys.elementAt(index);
+          final quantity = stockVM.stock[productId] ?? 0;
+
           return FutureBuilder<DocumentSnapshot>(
             future: FirebaseFirestore.instance
                 .collection('products')
@@ -136,36 +159,38 @@ class _StockScreenState extends State<StockScreen> {
             builder: (context, snapshot) {
               if (snapshot.connectionState == ConnectionState.waiting) {
                 return const ListTile(
-                  title: Text('Loading...'),
                   leading: CircularProgressIndicator(),
+                  title: Text('Loading product...'),
                 );
               }
 
-              if (snapshot.hasError || !snapshot.hasData) {
+              if (!snapshot.hasData || !snapshot.data!.exists) {
                 return ListTile(
+                  leading: const Icon(Icons.error),
                   title: Text('Product ID: $productId'),
-                  subtitle: Text(snapshot.hasError 
-                    ? 'Error loading product' 
-                    : 'Product not found'),
+                  subtitle: const Text('Not found in database'),
                 );
               }
 
               final product = Product.fromFirestore(snapshot.data!);
-              return ListTile(
-                title: Text(product.name),
-                subtitle: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Quantity: ${stockVM.stock[productId]}'),
-                    if (product.barcode.isNotEmpty)
-                      Text('Barcode: ${product.barcode}',
-                        style: Theme.of(context).textTheme.bodySmall),
-                  ],
-                ),
-                trailing: Text('${product.price.toStringAsFixed(2)} €',
-                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    color: Theme.of(context).primaryColor,
+              return Card(
+                margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                child: ListTile(
+                  leading: product.imageUrl != null
+                      ? Image.network(product.imageUrl!, width: 50, height: 50)
+                      : const Icon(Icons.shopping_bag),
+                  title: Text(product.name),
+                  subtitle: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Quantity: $quantity'),
+                      if (product.barcode.isNotEmpty)
+                        Text('Barcode: ${product.barcode}'),
+                    ],
+                  ),
+                  trailing: Text(
+                    '€${product.price.toStringAsFixed(2)}',
+                    style: const TextStyle(fontWeight: FontWeight.bold),
                   ),
                 ),
               );
@@ -176,7 +201,7 @@ class _StockScreenState extends State<StockScreen> {
     );
   }
 
-  Widget _buildStockHistoryTab(AuthViewModel authVM, Map<String, dynamic> location) {
+  Widget _buildStockHistoryTab(AuthViewModel authVM) {
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance
           .collection('stockHistory')
@@ -189,12 +214,18 @@ class _StockScreenState extends State<StockScreen> {
         }
 
         if (snapshot.hasError) {
-          debugPrint('Stock history error: ${snapshot.error}');
           return Center(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
+                const Icon(Icons.error, size: 64, color: Colors.red),
+                const SizedBox(height: 16),
                 const Text('Error loading stock history'),
+                Text(
+                  snapshot.error.toString(),
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                const SizedBox(height: 16),
                 ElevatedButton(
                   onPressed: _loadData,
                   child: const Text('Retry'),
@@ -205,8 +236,33 @@ class _StockScreenState extends State<StockScreen> {
         }
 
         if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-          return Center(
-            child: Text('No stock history at ${location['name']}'),
+          return FutureBuilder<DocumentSnapshot>(
+            future: FirebaseFirestore.instance
+                .collection('locations')
+                .doc(authVM.currentUser!.assignedLocationId)
+                .get(),
+            builder: (context, locationSnapshot) {
+              if (!locationSnapshot.hasData) {
+                return const Center(child: CircularProgressIndicator());
+              }
+
+              final location = locationSnapshot.data!.data() as Map<String, dynamic>? ?? {};
+              return Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(Icons.history, size: 64, color: Colors.grey),
+                    const SizedBox(height: 16),
+                    Text(
+                      'No stock history at ${location['name']}',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    const SizedBox(height: 8),
+                    const Text('Stock changes will appear here'),
+                  ],
+                ),
+              );
+            },
           );
         }
 
@@ -215,44 +271,98 @@ class _StockScreenState extends State<StockScreen> {
           itemBuilder: (context, index) {
             final doc = snapshot.data!.docs[index];
             final data = doc.data() as Map<String, dynamic>;
+            final timestamp = (data['timestamp'] as Timestamp).toDate();
 
-            return Card(
-              margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
-              child: ListTile(
-                title: FutureBuilder<DocumentSnapshot>(
-                  future: FirebaseFirestore.instance
-                      .collection('products')
-                      .doc(data['productId'])
-                      .get(),
-                  builder: (context, productSnapshot) {
-                    if (productSnapshot.connectionState == ConnectionState.waiting) {
-                      return const Text('Loading product...');
-                    }
-                    if (!productSnapshot.hasData || !productSnapshot.data!.exists) {
-                      return Text('Product ID: ${data['productId']}');
-                    }
-                    final product = Product.fromFirestore(productSnapshot.data!);
-                    return Text(product.name);
-                  },
-                ),
-                subtitle: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Quantity: ${data['quantity']}'),
-                    Text('Location: ${location['name']} (${location['type']})'),
-                    Text(
-                      DateFormat('dd/MM/yyyy HH:mm').format(
-                        (data['timestamp'] as Timestamp).toDate(),
-                      ),
-                      style: Theme.of(context).textTheme.bodySmall,
+            return FutureBuilder(
+              future: Future.wait([
+                FirebaseFirestore.instance
+                    .collection('products')
+                    .doc(data['productId'])
+                    .get(),
+                FirebaseFirestore.instance
+                    .collection('users')
+                    .doc(data['adminId'])
+                    .get(),
+              ]),
+              builder: (context, AsyncSnapshot<List<DocumentSnapshot>> snap) {
+                if (snap.connectionState == ConnectionState.waiting) {
+                  return const ListTile(
+                    leading: CircularProgressIndicator(),
+                    title: Text('Loading history details...'),
+                  );
+                }
+
+                final product = snap.data?[0].exists ?? false
+                    ? Product.fromFirestore(snap.data![0])
+                    : null;
+                final admin = snap.data?[1].exists ?? false
+                    ? snap.data![1].data() as Map<String, dynamic>
+                    : null;
+
+                return Card(
+                  margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  child: ListTile(
+                    leading: FutureBuilder<DocumentSnapshot>(
+                      future: FirebaseFirestore.instance
+                          .collection('products')
+                          .doc(data['productId'])
+                          .get(),
+                      builder: (context, productSnapshot) {
+                        if (productSnapshot.connectionState == ConnectionState.waiting) {
+                          return const SizedBox(
+                            width: 50,
+                            height: 50,
+                            child: CircularProgressIndicator(),
+                          );
+                        }
+                        
+                        if (!productSnapshot.hasData || !productSnapshot.data!.exists) {
+                          return const Icon(Icons.error, color: Colors.red);
+                        }
+
+                        final product = Product.fromFirestore(productSnapshot.data!);
+                        return product.imageUrl != null
+                            ? Image.network(product.imageUrl!, width: 50, height: 50)
+                            : const Icon(Icons.shopping_bag);
+                      },
                     ),
-                  ],
-                ),
-                trailing: Text(
-                  (data['quantity'] as int) > 0 ? '➕' : '➖',
-                  style: const TextStyle(fontSize: 24),
-                ),
-              ),
+                    title: FutureBuilder<DocumentSnapshot>(
+                      future: FirebaseFirestore.instance
+                          .collection('products')
+                          .doc(data['productId'])
+                          .get(),
+                      builder: (context, productSnapshot) {
+                        if (productSnapshot.connectionState == ConnectionState.waiting) {
+                          return const Text('Loading product...');
+                        }
+                        
+                        if (!productSnapshot.hasData || !productSnapshot.data!.exists) {
+                          return Text('Product ID: ${data['productId']}');
+                        }
+
+                        final product = Product.fromFirestore(productSnapshot.data!);
+                        return Text(product.name);
+                      },
+                    ),
+                    subtitle: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Quantity: ${data['quantity']}'),
+                        if (admin != null)
+                          Text('Updated by: ${admin['email']}'),
+                        Text(
+                          DateFormat('MMM dd, yyyy - HH:mm').format(timestamp),
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ],
+                    ),
+                    trailing: Icon(
+                      (data['quantity'] as int) > 0 ? Icons.add : Icons.remove,
+                      color: (data['quantity'] as int) > 0 ? Colors.green : Colors.red,
+                    ),
+                  ),
+                );
+              },
             );
           },
         );

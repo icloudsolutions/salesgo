@@ -73,6 +73,7 @@ class AuthViewModel with ChangeNotifier {
           email: user.email ?? '',
           name: name,
           role: role,
+          createdAt: DateTime.now(),
         );
         _userRole = role;
       }

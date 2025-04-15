@@ -7,6 +7,9 @@ class Product {
   final String category;
   final String barcode;
   final String? imageUrl;
+  final List<String> availableLocations;
+
+  
 
   Product({
     required this.id,
@@ -15,6 +18,8 @@ class Product {
     required this.category,
     required this.barcode,
     this.imageUrl,
+    this.availableLocations = const [],
+
   });
 
   factory Product.fromFirestore(DocumentSnapshot doc) {
@@ -26,6 +31,8 @@ class Product {
       category: data['category'] as String? ?? '',
       barcode: data['barcode'] as String? ?? '',
       imageUrl: data['imageUrl'] as String?,
+      availableLocations: List<String>.from(data['availableLocations'] ?? []),
+
     );
   }
 
@@ -37,6 +44,7 @@ class Product {
       category: map['category'] as String? ?? '',
       barcode: map['barcode'] as String? ?? '',
       imageUrl: map['imageUrl'] as String?,
+      
     );
   }
   
@@ -47,5 +55,7 @@ class Product {
     'category': category,
     'barcode': barcode,
     'imageUrl': imageUrl, 
+    'availableLocations': availableLocations,
+
   };
 }

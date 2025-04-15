@@ -76,6 +76,7 @@ Future<void> confirmSale({
       totalAmount: discountedProducts.fold(0, (sum, item) => sum + item.price),
       paymentMethod: paymentMethod,
       couponCode: couponCode,
+      locationId: '',
     );
 
     await _firestoreService.recordSale(sale);

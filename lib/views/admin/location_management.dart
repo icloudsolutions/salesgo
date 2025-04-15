@@ -24,12 +24,28 @@ class _LocationManagementState extends State<LocationManagement> {
           name: _nameController.text,
           type: _selectedType,
           assignedAgentId: _selectedAgentId,
+          createdAt: DateTime.now(),
         );
 
-        await FirebaseFirestore.instance
+        // Create a batch to update both documents atomically
+        final batch = FirebaseFirestore.instance.batch();
+        
+        // 1. Set the location document
+        final locationRef = FirebaseFirestore.instance
             .collection('locations')
-            .doc(location.id)
-            .set(location.toMap());
+            .doc(location.id);
+        batch.set(locationRef, location.toMap());
+        
+        // 2. If an agent is assigned, update the user document
+        if (_selectedAgentId != null) {
+          final userRef = FirebaseFirestore.instance
+              .collection('users')
+              .doc(_selectedAgentId);
+          batch.update(userRef, {'assignedLocationId': location.id});
+        }
+
+        // Commit both operations together
+        await batch.commit();
 
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Location added successfully')),
@@ -44,6 +60,7 @@ class _LocationManagementState extends State<LocationManagement> {
         );
       }
     }
+  
   }
 
   @override
