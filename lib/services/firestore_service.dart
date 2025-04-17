@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:salesgo/models/discount.dart';
 import '../models/product.dart';
 import '../models/sale.dart';
 
@@ -16,6 +17,22 @@ class FirestoreService {
     return snapshot.docs.isEmpty 
         ? null 
         : Product.fromFirestore(snapshot.docs.first);
+  }
+
+  // For getting products by category
+  Future<List<Product>> getProductsByCategory(DocumentReference categoryRef) async {
+    final snapshot = await FirebaseFirestore.instance
+        .collection('products')
+        .where('categoryRef', isEqualTo: categoryRef)
+        .get();
+
+    return snapshot.docs.map((doc) => Product.fromFirestore(doc)).toList();
+  } 
+
+
+
+  Future<DocumentReference> getCategoryReference(String categoryId) async {
+    return FirebaseFirestore.instance.collection('categories').doc(categoryId);
   }
 
   // Ventes
@@ -39,6 +56,16 @@ class FirestoreService {
         .where('endDate', isGreaterThanOrEqualTo: now)
         .get();
   }
+
+  // For getting discounts by category
+  Future<List<Discount>> getDiscountsByCategory(DocumentReference categoryRef) async {
+    final snapshot = await FirebaseFirestore.instance
+        .collection('discounts')
+        .where('categoryRef', isEqualTo: categoryRef)
+        .get();
+
+    return snapshot.docs.map((doc) => Discount.fromFirestore(doc)).toList();
+  } 
 
   Future<List<Sale>> getAgentSales(String agentId) async {
     final snapshot = await _firestore.collection('sales')
@@ -82,16 +109,20 @@ class FirestoreService {
   }
 
   // Discounts
-  Future<void> addDiscount(Map<String, dynamic> discountData) async {
-    await _firestore.collection('discounts').add(discountData);
+  Future<void> addDiscount(Map<String, dynamic> discountData) {
+    return _firestore.collection('discounts').add(discountData);
+  }
+
+  Future<void> updateDiscount(String id, Map<String, dynamic> discountData) {
+    return _firestore.collection('discounts').doc(id).update(discountData);
   }
 
   Stream<QuerySnapshot> getDiscounts() {
     return _firestore.collection('discounts').snapshots();
   }
 
-  Future<void> deleteDiscount(String discountId) async {
-    await _firestore.collection('discounts').doc(discountId).delete();
+  Future<void> deleteDiscount(String id) {
+    return _firestore.collection('discounts').doc(id).delete();
   }
 }
 

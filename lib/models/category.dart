@@ -3,13 +3,13 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 class Category {
   final String id;
   final String name;
-  //final String? imageUrl;
+  final DocumentReference? reference; // Add reference field
   final DateTime createdAt;
 
   Category({
     required this.id,
     required this.name,
-    //this.imageUrl,
+    this.reference,
     required this.createdAt,
   });
 
@@ -18,7 +18,7 @@ class Category {
     return Category(
       id: doc.id,
       name: data['name'] ?? '',
-      //imageUrl: data['imageUrl'],
+      reference: doc.reference,
       createdAt: (data['createdAt'] as Timestamp).toDate(),
     );
   }

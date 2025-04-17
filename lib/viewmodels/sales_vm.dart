@@ -60,7 +60,7 @@ Future<void> confirmSale({
           id: product.id,
           name: product.name,
           price: _calculatePriceWithDiscount(product.price, discount),
-          category: product.category,
+          categoryRef: product.categoryRef,
           barcode: product.barcode,
           imageUrl: product.imageUrl,
         );

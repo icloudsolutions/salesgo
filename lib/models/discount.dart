@@ -2,38 +2,69 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 
 class Discount {
   final String id;
-  final String category;
+  final DocumentReference categoryRef;
   final DateTime startDate;
   final DateTime endDate;
   final double value;
   final String type;
+  final String name;
+  final DocumentReference? reference;
 
   Discount({
     required this.id,
-    required this.category,
+    required this.categoryRef,
     required this.startDate,
     required this.endDate,
     required this.value,
-    required this.type, required String name,
+    required this.type,
+    required this.name,
+    this.reference,
   });
 
-  factory Discount.fromFirestore(Map<String, dynamic> data) {
-    return Discount(
-      id: data['id'] as String? ?? '', // Provide empty string as default
-      category: data['category'] as String? ?? 'general', // Default category
-      startDate: (data['startDate'] as Timestamp?)?.toDate() ?? DateTime.now(),
-      endDate: (data['endDate'] as Timestamp?)?.toDate() ?? DateTime.now().add(const Duration(days: 30)),
-      value: (data['value'] as num?)?.toDouble() ?? 0.0,
-      type: data['type'] as String? ?? 'percentage', name: '', // Default to percentage
-    );
+  /// Creates a Discount from a Firestore DocumentSnapshot
+  factory Discount.fromFirestore(DocumentSnapshot doc) {
+    try {
+      final data = doc.data() as Map<String, dynamic>;
+      
+      return Discount(
+        id: doc.id,
+        categoryRef: data['categoryRef'] as DocumentReference,
+        startDate: (data['startDate'] as Timestamp).toDate(),
+        endDate: (data['endDate'] as Timestamp).toDate(),
+        value: (data['value'] as num).toDouble(),
+        type: data['type'] as String,
+        name: data['name'] as String? ?? '',
+        reference: doc.reference,
+      );
+    } catch (e) {
+      throw FormatException('Failed to parse Discount: $e');
+    }
   }
 
-  Map<String, dynamic> toMap() => {
-    'id': id,
-    'category': category,
-    'startDate': startDate,
-    'endDate': endDate,
-    'value': value,
-    'type': type,
-  };
+
+
+  /// Converts the Discount to a Map for Firestore
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'categoryRef': categoryRef,
+      'startDate': Timestamp.fromDate(startDate),
+      'endDate': Timestamp.fromDate(endDate),
+      'value': value,
+      'type': type,
+      if (name.isNotEmpty) 'name': name,
+    };
+  }
+
+  /// Helper method to check if discount is currently active
+  bool get isActive {
+    final now = DateTime.now();
+    return now.isAfter(startDate) && now.isBefore(endDate);
+  }
+
+  @override
+  String toString() {
+    return 'Discount(id: $id, name: $name, value: $value$type, '
+           'active: ${startDate.toIso8601String()} to ${endDate.toIso8601String()})';
+  }
 }

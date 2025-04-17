@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:intl/intl.dart';
 import 'package:salesgo/models/product.dart';
 import 'package:salesgo/models/discount.dart';
 import 'package:salesgo/models/category.dart';
@@ -83,11 +84,16 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
     if (_formKey.currentState!.validate()) {
       setState(() => _isLoading = true);
       try {
+
+        final categoryRef = FirebaseFirestore.instance
+            .collection('categories')
+            .doc(_selectedProductCategory);
+
         final product = Product(
           id: FirebaseFirestore.instance.collection('products').doc().id,
           name: _nameController.text,
           price: double.parse(_priceController.text),
-          category: _selectedProductCategory ?? '',
+          categoryRef: categoryRef, 
           barcode: _barcodeController.text,
           imageUrl: _imageUrl,
         );
@@ -122,13 +128,18 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
     if (_formKey.currentState!.validate()) {
       setState(() => _isLoading = true);
       try {
+
+        final categoryRef = FirebaseFirestore.instance
+            .collection('categories')
+            .doc(_selectedProductCategory);
+
         await FirebaseFirestore.instance
             .collection('products')
             .doc(productId)
             .update({
               'name': _nameController.text,
               'price': double.parse(_priceController.text),
-              'category': _selectedProductCategory,
+              'categoryRef': categoryRef, // Using DocumentReference
               'barcode': _barcodeController.text,
               'imageUrl': _imageUrl,
             });
@@ -198,22 +209,22 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
       // 2. Update all products in this category
       final productsQuery = await FirebaseFirestore.instance
           .collection('products')
-          .where('category', isEqualTo: oldName)
+          .where('categoryId', isEqualTo: oldName)
           .get();
 
       final batch = FirebaseFirestore.instance.batch();
       for (final doc in productsQuery.docs) {
-        batch.update(doc.reference, {'category': newName});
+        batch.update(doc.reference, {'categoryId': newName});
       }
 
       // 3. Update all discounts for this category
       final discountsQuery = await FirebaseFirestore.instance
           .collection('discounts')
-          .where('category', isEqualTo: oldName)
+          .where('categoryId', isEqualTo: oldName)
           .get();
 
       for (final doc in discountsQuery.docs) {
-        batch.update(doc.reference, {'category': newName});
+        batch.update(doc.reference, {'categoryId': newName});
       }
 
       // Commit all updates in a single batch
@@ -262,14 +273,17 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
 
     setState(() => _isLoading = true);
     try {
+      final categoryRef = FirebaseFirestore.instance
+          .collection('categories')
+          .doc(_selectedDiscountCategory);
+
       final discountData = {
         'id': FirebaseFirestore.instance.collection('discounts').doc().id,
         'name': _discountNameController.text,
-        'category': _selectedDiscountCategory!,
+        'categoryRef': categoryRef,  // Store DocumentReference
         'value': double.parse(_discountValueController.text),
         'type': _discountTypeController.text,
         'hasDateRange': _hasDateRange,
-        // Only store dates if range enabled
         if (_hasDateRange) 'startDate': _discountStartDate!,
         if (_hasDateRange) 'endDate': _discountEndDate!,
       };
@@ -332,9 +346,13 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
 
     setState(() => _isLoading = true);
     try {
+      final categoryRef = FirebaseFirestore.instance
+          .collection('categories')
+          .doc(_selectedDiscountCategory);
+
       final updateData = {
         'name': _discountNameController.text,
-        'category': _selectedDiscountCategory!,
+        'categoryRef': categoryRef,  // Store DocumentReference
         'value': double.parse(_discountValueController.text),
         'type': _discountTypeController.text,
         'hasDateRange': _hasDateRange,
@@ -373,8 +391,11 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
     _discountNameController.text = data['name'] ?? '';
     _discountValueController.text = data['value'].toString();
     _discountTypeController.text = data['type'];
-    _selectedDiscountCategory = data['category'];
-    
+    // Get the category ID from the DocumentReference
+    final categoryRef = data['categoryRef'] as DocumentReference;
+    final categorySnapshot = await categoryRef.get();
+    _selectedDiscountCategory = categorySnapshot.id;    
+
     setState(() {
       _hasDateRange = data['hasDateRange'] ?? false;
       if (_hasDateRange) {
@@ -431,11 +452,11 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
           .doc(discountId)
           .delete();
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Discount deleted')),
+        const SnackBar(content: Text('Discount deleted successfully')),
       );
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error deleting discount: $e')),
+        SnackBar(content: Text('Error deleting discount: ${e.toString()}')),
       );
     }
   }
@@ -471,7 +492,11 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
   Future<void> _editProduct(Product product) async {
     _nameController.text = product.name;
     _priceController.text = product.price.toString();
-    _selectedProductCategory = product.category;
+    
+    // Get the category ID from the DocumentReference
+    final categorySnapshot = await product.categoryRef.get();
+    _selectedProductCategory = categorySnapshot.id;
+    
     _barcodeController.text = product.barcode;
     setState(() => _imageUrl = product.imageUrl);
 
@@ -573,27 +598,44 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
             itemCount: snapshot.data!.docs.length,
             itemBuilder: (context, index) {
               final doc = snapshot.data!.docs[index];
-              final product = Product.fromMap(doc.data() as Map<String, dynamic>, doc.id);
+              final product = Product.fromFirestore(doc);
               
-              return ListTile(
-                leading: product.imageUrl != null 
-                    ? Image.network(product.imageUrl!, width: 50, height: 50)
-                    : const Icon(Icons.shopping_bag),
-                title: Text(product.name),
-                subtitle: Text('€${product.price} - ${product.category}'),
-                trailing: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    IconButton(
-                      icon: const Icon(Icons.edit),
-                      onPressed: () => _editProduct(product),
+              return FutureBuilder<DocumentSnapshot>(
+                future: product.categoryRef.get(),
+                builder: (context, categorySnapshot) {
+                  if (!categorySnapshot.hasData) {
+                    return ListTile(
+                      leading: product.imageUrl != null 
+                          ? Image.network(product.imageUrl!, width: 50, height: 50)
+                          : const Icon(Icons.shopping_bag),
+                      title: Text(product.name),
+                      subtitle: Text('€${product.price} - Loading category...'),
+                    );
+                  }
+                  
+                  final categoryName = categorySnapshot.data!['name'] ?? 'Unknown';
+                  
+                  return ListTile(
+                    leading: product.imageUrl != null 
+                        ? Image.network(product.imageUrl!, width: 50, height: 50)
+                        : const Icon(Icons.shopping_bag),
+                    title: Text(product.name),
+                    subtitle: Text('€${product.price} - $categoryName'),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.edit),
+                          onPressed: () => _editProduct(product),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.delete),
+                          onPressed: () => _deleteProduct(doc.id),
+                        ),
+                      ],
                     ),
-                    IconButton(
-                      icon: const Icon(Icons.delete),
-                      onPressed: () => _deleteProduct(doc.id),
-                    ),
-                  ],
-                ),
+                  );
+                },
               );
             },
           );
@@ -640,47 +682,83 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
   }
 
   // Update the _buildDiscountsTab method to show date range info
-  // Update the _buildDiscountsTab method to show date range info
   Widget _buildDiscountsTab() {
     return Padding(
       padding: const EdgeInsets.all(16.0),
       child: StreamBuilder<QuerySnapshot>(
         stream: FirebaseFirestore.instance.collection('discounts').snapshots(),
         builder: (context, snapshot) {
-          if (!snapshot.hasData) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
+
+          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+            return const Center(
+              child: Text(
+                'No discounts available',
+                style: TextStyle(fontSize: 16),
+              ),
+            );
+          }
+
           return ListView.builder(
             itemCount: snapshot.data!.docs.length,
             itemBuilder: (context, index) {
               final doc = snapshot.data!.docs[index];
-              final data = doc.data() as Map<String, dynamic>;
-              final hasDateRange = data['hasDateRange'] ?? false;
-              String dateText = 'No date range';
-              
-              if (hasDateRange && data['startDate'] != null && data['endDate'] != null) {
-                final startDate = (data['startDate'] as Timestamp).toDate();
-                final endDate = (data['endDate'] as Timestamp).toDate();
-                dateText = '${_formatDate(startDate)} to ${_formatDate(endDate)}';
-              }
-              
-              return ListTile(
-                leading: const Icon(Icons.discount),
-                title: Text('${data['name']} - ${data['value']}${data['type']} (${data['category']})'),
-                subtitle: Text(dateText),
-                trailing: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    IconButton(
-                      icon: const Icon(Icons.edit),
-                      onPressed: () => _editDiscount(doc),
+              final discount = Discount.fromFirestore(doc);
+
+              return FutureBuilder<DocumentSnapshot>(
+                future: discount.categoryRef.get(),
+                builder: (context, categorySnapshot) {
+                  final categoryName = categorySnapshot.hasData
+                      ? categorySnapshot.data!.get('name') ?? 'Unknown Category'
+                      : 'Loading...';
+
+                  return Card(
+                    margin: const EdgeInsets.symmetric(vertical: 8),
+                    child: ListTile(
+                      leading: const Icon(Icons.discount, color: Colors.orange),
+                      title: Text(discount.name),
+                      subtitle: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Category: $categoryName'),
+                          Text(
+                            '${discount.value}${discount.type} discount',
+                            style: const TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                          Text(
+                            'Valid: ${DateFormat('MMM dd').format(discount.startDate)} - '
+                            '${DateFormat('MMM dd, yyyy').format(discount.endDate)}',
+                          ),
+                          if (discount.isActive)
+                            Chip(
+                              label: const Text('Active'),
+                              backgroundColor: Colors.green[100],
+                            )
+                          else
+                            Chip(
+                              label: const Text('Expired'),
+                              backgroundColor: Colors.red[100],
+                            ),
+                        ],
+                      ),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.edit),
+                            onPressed: () => _editDiscount(doc),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.delete, color: Colors.red),
+                            onPressed: () => _deleteDiscount(doc.id),
+                          ),
+                        ],
+                      ),
                     ),
-                    IconButton(
-                      icon: const Icon(Icons.delete),
-                      onPressed: () => _deleteDiscount(doc.id),
-                    ),
-                  ],
-                ),
+                  );
+                },
               );
             },
           );
@@ -720,7 +798,7 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
                   
                   final categories = snapshot.data!.docs.map((doc) {
                     return DropdownMenuItem<String>(
-                      value: doc['name'],
+                      value: doc.id,
                       child: Text(doc['name']),
                     );
                   }).toList();
@@ -803,53 +881,53 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
   }
 
   // Update the _buildDiscountForm method
-  Widget _buildDiscountForm({bool isEditing = false, String? discountId}) {
-    return StatefulBuilder(
-      builder: (BuildContext context, StateSetter setDialogState) {
-        return AlertDialog(
-          title: Text(isEditing ? 'Edit Discount' : 'Add New Discount'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextFormField(
-                  controller: _discountNameController,
-                  decoration: const InputDecoration(labelText: 'Discount Name'),
-                  validator: (value) => value!.isEmpty ? 'Required' : null,
-                ),
-                TextFormField(
-                  controller: _discountValueController,
-                  decoration: const InputDecoration(labelText: 'Value'),
-                  keyboardType: TextInputType.number,
-                  validator: (value) => value!.isEmpty ? 'Required' : null,
-                ),
-                TextFormField(
-                  controller: _discountTypeController,
-                  decoration: const InputDecoration(labelText: 'Type (e.g., %, \$)'),
-                  validator: (value) => value!.isEmpty ? 'Required' : null,
-                ),
-                StreamBuilder<QuerySnapshot>(
-                  stream: FirebaseFirestore.instance.collection('categories').snapshots(),
-                  builder: (context, snapshot) {
-                    if (!snapshot.hasData) return const SizedBox();
-                    
-                    final categories = snapshot.data!.docs.map((doc) {
-                      return DropdownMenuItem<String>(
-                        value: doc['name'],
-                        child: Text(doc['name']),
-                      );
-                    }).toList();
-                    
-                    return DropdownButtonFormField<String>(
-                      value: _selectedDiscountCategory,
-                      decoration: const InputDecoration(labelText: 'Category'),
-                      items: categories,
-                      onChanged: (value) {
-                        setDialogState(() {
-                          _selectedDiscountCategory = value;
-                        });
-                      },
-                      validator: (value) => value == null ? 'Please select a category' : null,
+Widget _buildDiscountForm({bool isEditing = false, String? discountId}) {
+  return StatefulBuilder(
+    builder: (BuildContext context, StateSetter setDialogState) {
+      return AlertDialog(
+        title: Text(isEditing ? 'Edit Discount' : 'Add New Discount'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextFormField(
+                controller: _discountNameController,
+                decoration: const InputDecoration(labelText: 'Discount Name'),
+                validator: (value) => value!.isEmpty ? 'Required' : null,
+              ),
+              TextFormField(
+                controller: _discountValueController,
+                decoration: const InputDecoration(labelText: 'Value'),
+                keyboardType: TextInputType.number,
+                validator: (value) => value!.isEmpty ? 'Required' : null,
+              ),
+              TextFormField(
+                controller: _discountTypeController,
+                decoration: const InputDecoration(labelText: 'Type (e.g., %, \$)'),
+                validator: (value) => value!.isEmpty ? 'Required' : null,
+              ),
+              StreamBuilder<QuerySnapshot>(
+                stream: FirebaseFirestore.instance.collection('categories').snapshots(),
+                builder: (context, snapshot) {
+                  if (!snapshot.hasData) return const SizedBox();
+                  
+                  final categories = snapshot.data!.docs.map((doc) {
+                    return DropdownMenuItem<String>(
+                      value: doc.id,  // Use document ID instead of name
+                      child: Text(doc['name']),
+                    );
+                  }).toList();
+                  
+                  return DropdownButtonFormField<String>(
+                    value: _selectedDiscountCategory,
+                    decoration: const InputDecoration(labelText: 'Category'),
+                    items: categories,
+                    onChanged: (value) {
+                      setDialogState(() {
+                        _selectedDiscountCategory = value;
+                      });
+                    },
+                    validator: (value) => value == null ? 'Please select a category' : null,
                     );
                   },
                 ),

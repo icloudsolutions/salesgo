@@ -33,7 +33,6 @@ lib/
 │   │   ├── agent_home_screen.dart
 │   │   ├── history_screen.dart
 │   │   ├── sales_screen.dart
-│   │   ├── stock_screen copy.dart
 │   │   └── stock_screen.dart
 │   ├── login_screen.dart
 │   └── signup_screen.dart
@@ -289,13 +288,13 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 class Category {
   final String id;
   final String name;
-  //final String? imageUrl;
+  final DocumentReference? reference; // Add reference field
   final DateTime createdAt;
 
   Category({
     required this.id,
     required this.name,
-    //this.imageUrl,
+    this.reference,
     required this.createdAt,
   });
 
@@ -304,7 +303,7 @@ class Category {
     return Category(
       id: doc.id,
       name: data['name'] ?? '',
-      //imageUrl: data['imageUrl'],
+      reference: doc.reference,
       createdAt: (data['createdAt'] as Timestamp).toDate(),
     );
   }
@@ -352,40 +351,87 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 
 class Discount {
   final String id;
-  final String category;
+  final DocumentReference categoryRef;
   final DateTime startDate;
   final DateTime endDate;
   final double value;
   final String type;
+  final String name;
+  final DocumentReference? reference;
 
   Discount({
     required this.id,
-    required this.category,
+    required this.categoryRef,
     required this.startDate,
     required this.endDate,
     required this.value,
-    required this.type, required String name,
+    required this.type,
+    required this.name,
+    this.reference,
   });
 
-  factory Discount.fromFirestore(Map<String, dynamic> data) {
-    return Discount(
-      id: data['id'] as String? ?? '', // Provide empty string as default
-      category: data['category'] as String? ?? 'general', // Default category
-      startDate: (data['startDate'] as Timestamp?)?.toDate() ?? DateTime.now(),
-      endDate: (data['endDate'] as Timestamp?)?.toDate() ?? DateTime.now().add(const Duration(days: 30)),
-      value: (data['value'] as num?)?.toDouble() ?? 0.0,
-      type: data['type'] as String? ?? 'percentage', name: '', // Default to percentage
-    );
+  /// Creates a Discount from a Firestore DocumentSnapshot
+  factory Discount.fromFirestore(DocumentSnapshot doc) {
+    try {
+      final data = doc.data() as Map<String, dynamic>;
+      
+      return Discount(
+        id: doc.id,
+        categoryRef: data['categoryRef'] as DocumentReference,
+        startDate: (data['startDate'] as Timestamp).toDate(),
+        endDate: (data['endDate'] as Timestamp).toDate(),
+        value: (data['value'] as num).toDouble(),
+        type: data['type'] as String,
+        name: data['name'] as String? ?? '',
+        reference: doc.reference,
+      );
+    } catch (e) {
+      throw FormatException('Failed to parse Discount: $e');
+    }
   }
 
-  Map<String, dynamic> toMap() => {
-    'id': id,
-    'category': category,
-    'startDate': startDate,
-    'endDate': endDate,
-    'value': value,
-    'type': type,
-  };
+  /// Creates a Discount from a Map (useful for testing or other data sources)
+  factory Discount.fromMap(Map<String, dynamic> data, {DocumentReference? ref}) {
+    try {
+      return Discount(
+        id: data['id'] as String,
+        categoryRef: data['categoryRef'] as DocumentReference,
+        startDate: (data['startDate'] as Timestamp).toDate(),
+        endDate: (data['endDate'] as Timestamp).toDate(),
+        value: (data['value'] as num).toDouble(),
+        type: data['type'] as String,
+        name: data['name'] as String? ?? '',
+        reference: ref,
+      );
+    } catch (e) {
+      throw FormatException('Failed to create Discount from map: $e');
+    }
+  }
+
+  /// Converts the Discount to a Map for Firestore
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'categoryRef': categoryRef,
+      'startDate': Timestamp.fromDate(startDate),
+      'endDate': Timestamp.fromDate(endDate),
+      'value': value,
+      'type': type,
+      if (name.isNotEmpty) 'name': name,
+    };
+  }
+
+  /// Helper method to check if discount is currently active
+  bool get isActive {
+    final now = DateTime.now();
+    return now.isAfter(startDate) && now.isBefore(endDate);
+  }
+
+  @override
+  String toString() {
+    return 'Discount(id: $id, name: $name, value: $value$type, '
+           'active: ${startDate.toIso8601String()} to ${endDate.toIso8601String()})';
+  }
 }
 
 models\location.dart:
@@ -437,21 +483,22 @@ class Product {
   final String id;
   final String name;
   final double price;
-  final String category;
+  final DocumentReference categoryRef;
   final String barcode;
   final String? imageUrl;
   final List<String> availableLocations;
-
-  
+  final DocumentReference? reference;
+ 
 
   Product({
     required this.id,
     required this.name,
     required this.price,
-    required this.category,
+    required this.categoryRef,
     required this.barcode,
     this.imageUrl,
     this.availableLocations = const [],
+    this.reference,
 
   });
 
@@ -461,7 +508,7 @@ class Product {
       id: doc.id,
       name: data['name'] as String? ?? '',
       price: (data['price'] as num?)?.toDouble() ?? 0.0,
-      category: data['category'] as String? ?? '',
+      categoryRef: data['categoryRef'] as DocumentReference,
       barcode: data['barcode'] as String? ?? '',
       imageUrl: data['imageUrl'] as String?,
       availableLocations: List<String>.from(data['availableLocations'] ?? []),
@@ -474,7 +521,7 @@ class Product {
       id: map['id'] as String? ?? '',
       name: map['name'] as String? ?? '',
       price: (map['price'] as num?)?.toDouble() ?? 0.0,
-      category: map['category'] as String? ?? '',
+      categoryRef: map['categoryRef'] as DocumentReference, 
       barcode: map['barcode'] as String? ?? '',
       imageUrl: map['imageUrl'] as String?,
       
@@ -485,7 +532,7 @@ class Product {
     'id': id,
     'name': name,
     'price': price,
-    'category': category,
+    'categoryRef': categoryRef,
     'barcode': barcode,
     'imageUrl': imageUrl, 
     'availableLocations': availableLocations,
@@ -718,6 +765,7 @@ services\firestore_service.dart:
 
 # services\firestore_service.dart
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:salesgo/models/discount.dart';
 import '../models/product.dart';
 import '../models/sale.dart';
 
@@ -737,14 +785,30 @@ class FirestoreService {
         : Product.fromFirestore(snapshot.docs.first);
   }
 
+  // For getting products by category
+  Future<List<Product>> getProductsByCategory(DocumentReference categoryRef) async {
+    final snapshot = await FirebaseFirestore.instance
+        .collection('products')
+        .where('categoryRef', isEqualTo: categoryRef)
+        .get();
+
+    return snapshot.docs.map((doc) => Product.fromFirestore(doc)).toList();
+  } 
+
+
+
+  Future<DocumentReference> getCategoryReference(String categoryId) async {
+    return FirebaseFirestore.instance.collection('categories').doc(categoryId);
+  }
+
   // Ventes
   Future<void> recordSale(Sale sale) async {
     await _firestore.collection('sales').add(sale.toMap());
   }
 
   // Stocks
-  Stream<Map<String, int>> getCarStock(String carId) {
-    return _firestore.collection('cars/$carId/stock')
+  Stream<Map<String, int>> getLocationStock(String locationId) {
+    return _firestore.collection('locations/$locationId/stock')
       .snapshots()
       .map((snapshot) => {
         for (var doc in snapshot.docs)
@@ -758,6 +822,16 @@ class FirestoreService {
         .where('endDate', isGreaterThanOrEqualTo: now)
         .get();
   }
+
+  // For getting discounts by category
+  Future<List<Discount>> getDiscountsByCategory(DocumentReference categoryRef) async {
+    final snapshot = await FirebaseFirestore.instance
+        .collection('discounts')
+        .where('categoryRef', isEqualTo: categoryRef)
+        .get();
+
+    return snapshot.docs.map((doc) => Discount.fromFirestore(doc)).toList();
+  } 
 
   Future<List<Sale>> getAgentSales(String agentId) async {
     final snapshot = await _firestore.collection('sales')
@@ -801,16 +875,20 @@ class FirestoreService {
   }
 
   // Discounts
-  Future<void> addDiscount(Map<String, dynamic> discountData) async {
-    await _firestore.collection('discounts').add(discountData);
+  Future<void> addDiscount(Map<String, dynamic> discountData) {
+    return _firestore.collection('discounts').add(discountData);
+  }
+
+  Future<void> updateDiscount(String id, Map<String, dynamic> discountData) {
+    return _firestore.collection('discounts').doc(id).update(discountData);
   }
 
   Stream<QuerySnapshot> getDiscounts() {
     return _firestore.collection('discounts').snapshots();
   }
 
-  Future<void> deleteDiscount(String discountId) async {
-    await _firestore.collection('discounts').doc(discountId).delete();
+  Future<void> deleteDiscount(String id) {
+    return _firestore.collection('discounts').doc(id).delete();
   }
 }
 
@@ -973,18 +1051,107 @@ import '../models/discount.dart';
 class DiscountViewModel with ChangeNotifier {
   final FirestoreService _firestoreService;
   List<Discount> _activeDiscounts = [];
+  bool _isLoading = false;
+  String? _error;
 
   DiscountViewModel({required FirestoreService firestoreService})
       : _firestoreService = firestoreService;
 
-  List<Discount> get activeDiscounts => _activeDiscounts;
+  List<Discount> get activeDiscounts => List.unmodifiable(_activeDiscounts);
+  bool get isLoading => _isLoading;
+  String? get error => _error;
 
   Future<void> loadActiveDiscounts() async {
-    final now = DateTime.now();
-    final snapshot = await _firestoreService.getActiveDiscounts(now);
-    _activeDiscounts = snapshot.docs
-      .map((doc) => Discount.fromFirestore(doc.data()))
-      .toList();
+    _setLoading(true);
+    _error = null;
+    
+    try {
+      final now = DateTime.now();
+      final snapshot = await _firestoreService.getActiveDiscounts(now);
+      
+      _activeDiscounts = snapshot.docs.map((doc) {
+        try {
+          return Discount.fromFirestore(doc);
+        } catch (e) {
+          debugPrint('Error parsing discount document ${doc.id}: $e');
+          return null;
+        }
+      }).whereType<Discount>().toList();
+      
+      notifyListeners();
+    } catch (e) {
+      _error = 'Failed to load discounts: ${e.toString()}';
+      debugPrint(_error!);
+      notifyListeners();
+      rethrow;
+    } finally {
+      _setLoading(false);
+    }
+  }
+
+  Future<List<Discount>> getDiscountsForCategory(DocumentReference categoryRef) async {
+    _setLoading(true);
+    try {
+      final discounts = await _firestoreService.getDiscountsByCategory(categoryRef);
+      return discounts.docs.map((doc) => Discount.fromFirestore(doc)).toList();
+    } catch (e) {
+      debugPrint('Error loading discounts for category: $e');
+      rethrow;
+    } finally {
+      _setLoading(false);
+    }
+  }
+
+  Future<void> addDiscount(Discount discount) async {
+    _setLoading(true);
+    try {
+      await _firestoreService.addDiscount(discount.toMap());
+      await loadActiveDiscounts(); // Refresh the list
+    } catch (e) {
+      _error = 'Failed to add discount: ${e.toString()}';
+      debugPrint(_error!);
+      rethrow;
+    } finally {
+      _setLoading(false);
+    }
+  }
+
+  Future<void> updateDiscount(Discount discount) async {
+    _setLoading(true);
+    try {
+      await _firestoreService.updateDiscount(discount.id, discount.toMap());
+      await loadActiveDiscounts(); // Refresh the list
+    } catch (e) {
+      _error = 'Failed to update discount: ${e.toString()}';
+      debugPrint(_error!);
+      rethrow;
+    } finally {
+      _setLoading(false);
+    }
+  }
+
+  Future<void> deleteDiscount(String discountId) async {
+    _setLoading(true);
+    try {
+      await _firestoreService.deleteDiscount(discountId);
+      _activeDiscounts.removeWhere((d) => d.id == discountId);
+      notifyListeners();
+    } catch (e) {
+      _error = 'Failed to delete discount: ${e.toString()}';
+      debugPrint(_error!);
+      rethrow;
+    } finally {
+      _setLoading(false);
+    }
+  }
+
+  void _setLoading(bool loading) {
+    _isLoading = loading;
+    notifyListeners();
+  }
+
+  void clearError() {
+    _error = null;
     notifyListeners();
   }
 }
@@ -1054,7 +1221,7 @@ Future<void> confirmSale({
           id: product.id,
           name: product.name,
           price: _calculatePriceWithDiscount(product.price, discount),
-          category: product.category,
+          categoryRef: product.categoryRef,
           barcode: product.barcode,
           imageUrl: product.imageUrl,
         );
@@ -1117,7 +1284,7 @@ class StockViewModel with ChangeNotifier {
   Map<String, int> get stock => _stock;
   bool get isLoading => _isLoading;
 
-  void loadStock(String carId) {
+  void loadStock(String locationId) {
     // Cancel any existing subscription
     _stockSubscription?.cancel();
     
@@ -1126,7 +1293,7 @@ class StockViewModel with ChangeNotifier {
     
     // Use a post-frame callback to ensure we're not in build phase
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _stockSubscription = _firestoreService.getCarStock(carId).listen(
+      _stockSubscription = _firestoreService.getLocationStock(locationId).listen(
         (stockData) {
           _stock = stockData;
           _isLoading = false;
@@ -1480,10 +1647,25 @@ class _LocationManagementState extends State<LocationManagement> {
           createdAt: DateTime.now(),
         );
 
-        await FirebaseFirestore.instance
+        // Create a batch to update both documents atomically
+        final batch = FirebaseFirestore.instance.batch();
+        
+        // 1. Set the location document
+        final locationRef = FirebaseFirestore.instance
             .collection('locations')
-            .doc(location.id)
-            .set(location.toMap());
+            .doc(location.id);
+        batch.set(locationRef, location.toMap());
+        
+        // 2. If an agent is assigned, update the user document
+        if (_selectedAgentId != null) {
+          final userRef = FirebaseFirestore.instance
+              .collection('users')
+              .doc(_selectedAgentId);
+          batch.update(userRef, {'assignedLocationId': location.id});
+        }
+
+        // Commit both operations together
+        await batch.commit();
 
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Location added successfully')),
@@ -1498,6 +1680,7 @@ class _LocationManagementState extends State<LocationManagement> {
         );
       }
     }
+  
   }
 
   @override
@@ -1703,11 +1886,16 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
     if (_formKey.currentState!.validate()) {
       setState(() => _isLoading = true);
       try {
+
+        final categoryRef = FirebaseFirestore.instance
+            .collection('categories')
+            .doc(_selectedProductCategory);
+
         final product = Product(
           id: FirebaseFirestore.instance.collection('products').doc().id,
           name: _nameController.text,
           price: double.parse(_priceController.text),
-          category: _selectedProductCategory ?? '',
+          categoryRef: categoryRef, 
           barcode: _barcodeController.text,
           imageUrl: _imageUrl,
         );
@@ -1742,13 +1930,18 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
     if (_formKey.currentState!.validate()) {
       setState(() => _isLoading = true);
       try {
+
+        final categoryRef = FirebaseFirestore.instance
+            .collection('categories')
+            .doc(_selectedProductCategory);
+
         await FirebaseFirestore.instance
             .collection('products')
             .doc(productId)
             .update({
               'name': _nameController.text,
               'price': double.parse(_priceController.text),
-              'category': _selectedProductCategory,
+              'categoryRef': categoryRef, // Using DocumentReference
               'barcode': _barcodeController.text,
               'imageUrl': _imageUrl,
             });
@@ -1818,22 +2011,22 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
       // 2. Update all products in this category
       final productsQuery = await FirebaseFirestore.instance
           .collection('products')
-          .where('category', isEqualTo: oldName)
+          .where('categoryId', isEqualTo: oldName)
           .get();
 
       final batch = FirebaseFirestore.instance.batch();
       for (final doc in productsQuery.docs) {
-        batch.update(doc.reference, {'category': newName});
+        batch.update(doc.reference, {'categoryId': newName});
       }
 
       // 3. Update all discounts for this category
       final discountsQuery = await FirebaseFirestore.instance
           .collection('discounts')
-          .where('category', isEqualTo: oldName)
+          .where('categoryId', isEqualTo: oldName)
           .get();
 
       for (final doc in discountsQuery.docs) {
-        batch.update(doc.reference, {'category': newName});
+        batch.update(doc.reference, {'categoryId': newName});
       }
 
       // Commit all updates in a single batch
@@ -2091,7 +2284,7 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
   Future<void> _editProduct(Product product) async {
     _nameController.text = product.name;
     _priceController.text = product.price.toString();
-    _selectedProductCategory = product.category;
+    _selectedProductCategory = product.categoryId;
     _barcodeController.text = product.barcode;
     setState(() => _imageUrl = product.imageUrl);
 
@@ -2200,7 +2393,7 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
                     ? Image.network(product.imageUrl!, width: 50, height: 50)
                     : const Icon(Icons.shopping_bag),
                 title: Text(product.name),
-                subtitle: Text('€${product.price} - ${product.category}'),
+                subtitle: Text('€${product.price} - ${product.categoryId}'),
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -2340,7 +2533,7 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
                   
                   final categories = snapshot.data!.docs.map((doc) {
                     return DropdownMenuItem<String>(
-                      value: doc['name'],
+                      value: doc.id,
                       child: Text(doc['name']),
                     );
                   }).toList();
@@ -2637,16 +2830,17 @@ views\admin\stock_management.dart:
 # views\admin\stock_management.dart
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
-import '../../models/product.dart';
-import '../../models/location.dart';
-import '../../viewmodels/auth_vm.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:salesgo/viewmodels/auth_vm.dart';
+
 
 class StockManagement extends StatefulWidget {
   const StockManagement({super.key});
 
   @override
-  State<StockManagement> createState() => _StockManagementState();
+  _StockManagementState createState() => _StockManagementState();
 }
 
 class _StockManagementState extends State<StockManagement> {
@@ -2654,13 +2848,17 @@ class _StockManagementState extends State<StockManagement> {
   final _formKey = GlobalKey<FormState>();
   final _productController = TextEditingController();
   final _quantityController = TextEditingController();
-  List<Product> _products = [];
-  Product? _selectedProduct;
-  bool _isLoading = false;
+  List<Map<String, dynamic>> _products = [];
+  Map<String, dynamic>? _selectedProduct;
+  bool _isScanning = false;
+  bool _isProcessingBarcode = false; // Prevent duplicate scans
+  late MobileScannerController _scannerController;
+  bool _isLoadingProducts = true; // Track product loading state
 
   @override
   void initState() {
     super.initState();
+    _scannerController = MobileScannerController();
     _loadProducts();
   }
 
@@ -2668,346 +2866,435 @@ class _StockManagementState extends State<StockManagement> {
   void dispose() {
     _productController.dispose();
     _quantityController.dispose();
+    _scannerController.dispose();
     super.dispose();
   }
 
   Future<void> _loadProducts() async {
-    setState(() => _isLoading = true);
     try {
       final snapshot = await FirebaseFirestore.instance
           .collection('products')
           .get();
-
-      setState(() {
-        _products = snapshot.docs.map((doc) => Product.fromFirestore(doc)).toList();
-      });
+      
+      if (mounted) {
+        setState(() {
+          _products = snapshot.docs.map((doc) {
+            final data = doc.data();
+            return {
+              'id': doc.id,
+              'name': data['name'] ?? 'Unknown Product',
+              'barcode': data['barcode'] ?? '',
+              'category': data['category'] ?? '',
+            };
+          }).toList();
+          _isLoadingProducts = false;
+        });
+      }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error loading products: $e')),
-      );
-    } finally {
-      setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() => _isLoadingProducts = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to load products: ${e.toString()}')),
+        );
+      }
     }
   }
 
-  Future<void> _assignStock() async {
-    if (_selectedLocationId == null || _selectedProduct == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please select location and product')),
-      );
-      return;
-    }
+  void _toggleScanning() {
+    if (_isProcessingBarcode) return;
+    
+    setState(() {
+      _isScanning = !_isScanning;
+      if (_isScanning) {
+        _scannerController.start();
+      } else {
+        _scannerController.stop();
+      }
+    });
+  }
 
-    if (!_formKey.currentState!.validate()) return;
+  void _handleBarcodeScan(BarcodeCapture capture) {
+    if (_isProcessingBarcode || capture.barcodes.isEmpty) return;
+    
+    final barcode = capture.barcodes.first.rawValue;
+    if (barcode == null || barcode.isEmpty) return;
 
-    setState(() => _isLoading = true);
+    setState(() => _isProcessingBarcode = true);
+
     try {
-      final quantity = int.parse(_quantityController.text);
-      final authVM = Provider.of<AuthViewModel>(context, listen: false);
-
-      // 1. Update stock at location
-      await FirebaseFirestore.instance
-          .collection('locations')
-          .doc(_selectedLocationId)
-          .collection('stock')
-          .doc(_selectedProduct!.id)
-          .set({
-            'productId': _selectedProduct!.id,
-            'quantity': quantity,
-            'lastUpdated': FieldValue.serverTimestamp(),
-          });
-
-      // 2. Update the product's available locations
-      await FirebaseFirestore.instance
-          .collection('products')
-          .doc(_selectedProduct!.id)
-          .update({
-            'availableLocations': FieldValue.arrayUnion([_selectedLocationId]),
-          });
-
-      // 3. Record in stock history
-      await FirebaseFirestore.instance
-          .collection('stockHistory')
-          .add({
-            'productId': _selectedProduct!.id,
-            'locationId': _selectedLocationId,
-            'quantity': quantity,
-            'adminId': authVM.currentUser?.uid,
-            'timestamp': FieldValue.serverTimestamp(),
-          });
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Stock updated successfully')),
+      // Find product in preloaded data
+      final product = _products.firstWhere(
+        (p) => p['barcode'] == barcode,
+        orElse: () => {},
       );
 
-      // Clear form
-      _productController.clear();
-      _quantityController.clear();
-      setState(() => _selectedProduct = null);
+      if (mounted) {
+        if (product.isNotEmpty) {
+          setState(() {
+            _selectedProduct = product;
+            _productController.text = '${product['name']} (${product['barcode']})';
+            _isScanning = false;
+          });
+          _scannerController.stop();
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Product not found for this barcode')),
+          );
+        }
+      }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error updating stock: $e')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error processing barcode: ${e.toString()}')),
+        );
+      }
     } finally {
-      setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() => _isProcessingBarcode = false);
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final authVM = Provider.of<AuthViewModel>(context);
+    final authVM = Provider.of<AuthViewModel>(context, listen: false);
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Stock Management'),
+        actions: [
+          IconButton(
+            icon: _isScanning 
+                ? const Icon(Icons.cancel, color: Colors.red)
+                : const Icon(Icons.qr_code_scanner),
+            onPressed: _isProcessingBarcode ? null : _toggleScanning,
+          ),
+        ],
       ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Form(
-                key: _formKey,
-                child: ListView(
-                  children: [
-                    // Location Selection
-                    StreamBuilder<QuerySnapshot>(
-                      stream: FirebaseFirestore.instance
-                          .collection('locations')
-                          .where('assignedAgentId', isEqualTo: authVM.currentUser?.uid)
-                          .snapshots(),
-                      builder: (context, snapshot) {
-                        if (!snapshot.hasData) {
-                          return const CircularProgressIndicator();
-                        }
-
-                        final locations = snapshot.data!.docs.map((doc) {
-                          return Location.fromFirestore(doc.data() as Map<String, dynamic>);
-                        }).toList();
-
-                        return DropdownButtonFormField<String>(
-                          value: _selectedLocationId,
-                          decoration: const InputDecoration(
-                            labelText: 'Select Location',
-                            border: OutlineInputBorder(),
-                          ),
-                          items: locations.map((location) {
-                            return DropdownMenuItem<String>(
-                              value: location.id,
-                              child: Text('${location.name} (${location.type})'),
-                            );
-                          }).toList(),
-                          onChanged: (value) {
-                            setState(() => _selectedLocationId = value);
-                          },
-                          validator: (value) =>
-                              value == null ? 'Please select a location' : null,
-                        );
-                      },
+      body: Stack(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Column(
+              children: [
+                // Scanner overlay
+                if (_isScanning)
+                  Container(
+                    height: 200,
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.blue),
+                      borderRadius: BorderRadius.circular(8),
                     ),
-                    const SizedBox(height: 20),
-
-                    // Product Selection
-                    Autocomplete<Product>(
-                      optionsBuilder: (TextEditingValue textEditingValue) {
-                        if (textEditingValue.text.isEmpty) {
-                          return const Iterable<Product>.empty();
-                        }
-                        return _products.where((product) =>
-                            product.name.toLowerCase().contains(
-                                  textEditingValue.text.toLowerCase(),
-                                ) ||
-                            product.barcode.contains(textEditingValue.text));
-                      },
-                      onSelected: (Product selection) {
-                        setState(() {
-                          _selectedProduct = selection;
-                          _productController.text = selection.name;
-                        });
-                      },
-                      displayStringForOption: (Product option) => option.name,
-                      fieldViewBuilder: (
-                        BuildContext context,
-                        TextEditingController textEditingController,
-                        FocusNode focusNode,
-                        VoidCallback onFieldSubmitted,
-                      ) {
-                        return TextFormField(
-                          controller: _productController,
-                          focusNode: focusNode,
-                          decoration: const InputDecoration(
-                            labelText: 'Search Product',
-                            border: OutlineInputBorder(),
+                    child: Stack(
+                      children: [
+                        MobileScanner(
+                          controller: _scannerController,
+                          onDetect: _handleBarcodeScan,
+                        ),
+                        if (_isProcessingBarcode)
+                          const Center(
+                            child: CircularProgressIndicator(),
                           ),
-                          validator: (value) =>
-                              value == null || value.isEmpty ? 'Please select a product' : null,
-                        );
-                      },
-                      optionsViewBuilder: (
-                        BuildContext context,
-                        AutocompleteOnSelected<Product> onSelected,
-                        Iterable<Product> options,
-                      ) {
-                        return Align(
-                          alignment: Alignment.topLeft,
-                          child: Material(
-                            elevation: 4.0,
-                            child: SizedBox(
-                              height: 200,
-                              child: ListView.builder(
-                                padding: EdgeInsets.zero,
-                                itemCount: options.length,
-                                itemBuilder: (BuildContext context, int index) {
-                                  final product = options.elementAt(index);
-                                  return InkWell(
-                                    onTap: () => onSelected(product),
-                                    child: Padding(
-                                      padding: const EdgeInsets.all(16.0),
-                                      child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          Text(
-                                            product.name,
-                                            style: const TextStyle(fontWeight: FontWeight.bold),
-                                          ),
-                                          Text('Barcode: ${product.barcode}'),
-                                          Text('Category: ${product.category}'),
-                                        ],
-                                      ),
-                                    ),
-                                  );
-                                },
-                              ),
-                            ),
-                          ),
-                        );
-                      },
+                      ],
                     ),
-                    const SizedBox(height: 16),
-
-                    // Quantity Input
-                    TextFormField(
-                      controller: _quantityController,
-                      keyboardType: TextInputType.number,
+                  ),
+                if (_isScanning) const SizedBox(height: 16),
+                
+                // Location Selection Dropdown
+                StreamBuilder<QuerySnapshot>(
+                  stream: FirebaseFirestore.instance.collection('locations').snapshots(),
+                  builder: (context, snapshot) {
+                    if (!snapshot.hasData) return const CircularProgressIndicator();
+                    
+                    return DropdownButtonFormField<String>(
+                      value: _selectedLocationId,
                       decoration: const InputDecoration(
-                        labelText: 'Quantity',
+                        labelText: 'Select Location',
                         border: OutlineInputBorder(),
                       ),
-                      validator: (value) {
-                        if (value == null || value.isEmpty) {
-                          return 'Please enter quantity';
-                        }
-                        if (int.tryParse(value) == null) {
-                          return 'Please enter a valid number';
-                        }
-                        return null;
-                      },
-                    ),
-                    const SizedBox(height: 20),
-
-                    // Submit Button
-                    ElevatedButton(
-                      onPressed: _assignStock,
-                      style: ElevatedButton.styleFrom(
-                        minimumSize: const Size(double.infinity, 50),
-                      ),
-                      child: const Text('Assign Stock'),
-                    ),
-                    const SizedBox(height: 20),
-                    const Divider(),
-
-                    // Current Stock Section
-                    const Text('Current Stock', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 10),
-                    _buildCurrentStockList(),
-                  ],
+                      items: snapshot.data!.docs.map((doc) {
+                        final location = doc.data() as Map<String, dynamic>;
+                        return DropdownMenuItem<String>(
+                          value: doc.id,
+                          child: Text('${location['name']} (${location['type']})'),
+                        );
+                      }).toList(),
+                      onChanged: (value) => setState(() => _selectedLocationId = value),
+                      validator: (value) => value == null ? 'Please select a location' : null,
+                    );
+                  },
                 ),
-              ),
+                const SizedBox(height: 20),
+                
+                // Stock Assignment Form
+                Form(
+                  key: _formKey,
+                  child: Column(
+                    children: [
+                      Autocomplete<Map<String, dynamic>>(
+                        optionsBuilder: (TextEditingValue textEditingValue) {
+                          if (textEditingValue.text.isEmpty) {
+                            return const Iterable<Map<String, dynamic>>.empty();
+                          }
+                          return _products.where((product) => 
+                            product['name'].toLowerCase().contains(textEditingValue.text.toLowerCase()) ||
+                            (product['barcode']?.toString() ?? '').contains(textEditingValue.text)
+                          );
+                        },
+                        onSelected: (Map<String, dynamic> selection) {
+                          setState(() {
+                            _selectedProduct = selection;
+                            _productController.text = '${selection['name']} (${selection['barcode']})';
+                          });
+                        },
+                        displayStringForOption: (Map<String, dynamic> option) => 
+                          '${option['name']} (${option['barcode']})',
+                        fieldViewBuilder: (
+                          BuildContext context,
+                          TextEditingController textEditingController,
+                          FocusNode focusNode,
+                          VoidCallback onFieldSubmitted,
+                        ) {
+                          // Sync the internal controller with our _productController
+                          _productController.addListener(() {
+                            if (_productController.text != textEditingController.text) {
+                              textEditingController.text = _productController.text;
+                            }
+                          });
+
+                          return TextFormField(
+                            controller: textEditingController, // Use the Autocomplete's controller
+                            focusNode: focusNode,
+                            decoration: const InputDecoration(
+                              labelText: 'Search Product',
+                              border: OutlineInputBorder(),
+                            ),
+                            validator: (value) {
+                              if (value == null || value.isEmpty) {
+                                return 'Please select a product';
+                              }
+                              return null;
+                            },
+                          );
+                        },
+                        optionsViewBuilder: (
+                          BuildContext context,
+                          AutocompleteOnSelected<Map<String, dynamic>> onSelected,
+                          Iterable<Map<String, dynamic>> options,
+                        ) {
+                          return Align(
+                            alignment: Alignment.topLeft,
+                            child: Material(
+                              elevation: 4.0,
+                              child: SizedBox(
+                                height: 200,
+                                child: ListView.builder(
+                                  padding: EdgeInsets.zero,
+                                  itemCount: options.length,
+                                  itemBuilder: (BuildContext context, int index) {
+                                    final product = options.elementAt(index);
+                                    return InkWell(
+                                      onTap: () {
+                                        onSelected(product);
+                                        _productController.text = '${product['name']} (${product['barcode']})';
+                                      },
+                                      child: Padding(
+                                        padding: const EdgeInsets.all(16.0),
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              product['name'],
+                                              style: const TextStyle(fontWeight: FontWeight.bold),
+                                            ),
+                                            Text('Barcode: ${product['barcode']}'),
+                                          ],
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                      const SizedBox(height: 16),
+                      TextFormField(
+                        controller: _quantityController,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(
+                          labelText: 'Quantity',
+                          border: OutlineInputBorder(),
+                        ),
+                        validator: (value) {
+                          if (value == null || value.isEmpty) {
+                            return 'Please enter quantity';
+                          }
+                          if (int.tryParse(value) == null) {
+                            return 'Please enter a valid number';
+                          }
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 20),
+                      ElevatedButton(
+                        onPressed: _assignStock,
+                        style: ElevatedButton.styleFrom(
+                          minimumSize: const Size(double.infinity, 50),
+                        ),
+                        child: const Text('Assign Stock'),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 20),
+                const Divider(),
+                
+                // Stock History Section (Admin Only)
+                if (authVM.userRole == 'admin')
+                  Expanded(
+                    child: Column(
+                      children: [
+                        const Text(
+                          'Stock History',
+                          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 10),
+                        Expanded(
+                          child: StreamBuilder<QuerySnapshot>(
+                            stream: FirebaseFirestore.instance
+                                .collection('stockHistory')
+                                .orderBy('timestamp', descending: true)
+                                .snapshots(),
+                            builder: (context, snapshot) {
+                              if (!snapshot.hasData) {
+                                return const Center(child: CircularProgressIndicator());
+                              }
+                              
+                              return ListView.builder(
+                                itemCount: snapshot.data!.docs.length,
+                                itemBuilder: (context, index) {
+                                  final doc = snapshot.data!.docs[index];
+                                  final data = doc.data() as Map<String, dynamic>;
+                                  
+                                  return FutureBuilder(
+                                    future: Future.wait([
+                                      FirebaseFirestore.instance
+                                          .collection('locations')
+                                          .doc(data['locationId'])
+                                          .get(),
+                                      FirebaseFirestore.instance
+                                          .collection('products')
+                                          .doc(data['productId'])
+                                          .get(),
+                                      FirebaseFirestore.instance
+                                          .collection('users')
+                                          .doc(data['adminId'])
+                                          .get(),
+                                    ]),
+                                    builder: (context, AsyncSnapshot<List<DocumentSnapshot>> snapshot) {
+                                      if (!snapshot.hasData) {
+                                        return const ListTile(
+                                          title: Text('Loading...'),
+                                        );
+                                      }
+                                      
+                                      final location = snapshot.data![0].data() as Map<String, dynamic>? ?? {};
+                                      final product = snapshot.data![1].data() as Map<String, dynamic>? ?? {};
+                                      final admin = snapshot.data![2].data() as Map<String, dynamic>? ?? {};
+                                      
+                                      return Card(
+                                        margin: const EdgeInsets.symmetric(vertical: 4),
+                                        child: ListTile(
+                                          title: Text(product['name'] ?? 'Unknown Product'),
+                                          subtitle: Column(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              Text('Location: ${location['name']} (${location['type']})'),
+                                              Text('Quantity: ${data['quantity']}'),
+                                              Text('Admin: ${admin['email']}'),
+                                            ],
+                                          ),
+                                          trailing: Text(
+                                            DateFormat('dd/MM/yy HH:mm').format(
+                                              (data['timestamp'] as Timestamp).toDate(),
+                                            ),
+                                          ),
+                                        ),
+                                      );
+                                    },
+                                  );
+                                },
+                              );
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+              ],
             ),
+          ),
+          if (_isLoadingProducts)
+            const Center(child: CircularProgressIndicator()),
+        ],
+      ),
     );
   }
 
-  Widget _buildCurrentStockList() {
+  Future<void> _assignStock() async {
     if (_selectedLocationId == null) {
-      return const Center(child: Text('Select a location to view stock'));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please select a location')),
+      );
+      return;
     }
 
-    return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance
-          .collection('locations')
-          .doc(_selectedLocationId)
-          .collection('stock')
-          .snapshots(),
-      builder: (context, snapshot) {
-        if (!snapshot.hasData) {
-          return const CircularProgressIndicator();
+    if (_selectedProduct == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please select a product')),
+      );
+      return;
+    }
+
+    if (_formKey.currentState!.validate()) {
+      final productId = _selectedProduct!['id'];
+      final quantity = int.parse(_quantityController.text);
+      final authVM = Provider.of<AuthViewModel>(context, listen: false);
+
+      try {
+        // Update stock
+        await FirebaseFirestore.instance
+            .collection('locations/$_selectedLocationId/stock')
+            .doc(productId)
+            .set({'quantity': quantity});
+
+        // Record history if admin
+        if (authVM.userRole == 'admin') {
+          await FirebaseFirestore.instance.collection('stockHistory').add({
+            'locationId': _selectedLocationId,
+            'productId': productId,
+            'quantity': quantity,
+            'timestamp': DateTime.now(),
+            'adminId': authVM.currentUser?.uid,
+          });
         }
 
-        return ListView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          itemCount: snapshot.data!.docs.length,
-          itemBuilder: (context, index) {
-            final doc = snapshot.data!.docs[index];
-            final data = doc.data() as Map<String, dynamic>;
-
-            return FutureBuilder<DocumentSnapshot>(
-              future: FirebaseFirestore.instance
-                  .collection('products')
-                  .doc(data['productId'])
-                  .get(),
-              builder: (context, productSnapshot) {
-                if (!productSnapshot.hasData) {
-                  return const ListTile(
-                    title: Text('Loading...'),
-                    leading: CircularProgressIndicator(),
-                  );
-                }
-
-                final product = Product.fromFirestore(productSnapshot.data!);
-                return ListTile(
-                  leading: product.imageUrl != null
-                      ? Image.network(product.imageUrl!, width: 50, height: 50)
-                      : const Icon(Icons.shopping_bag),
-                  title: Text(product.name),
-                  subtitle: Text('Quantity: ${data['quantity']}'),
-                  trailing: IconButton(
-                    icon: const Icon(Icons.delete),
-                    onPressed: () => _removeStock(doc.id, product.id),
-                  ),
-                );
-              },
-            );
-          },
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Stock updated successfully')),
         );
-      },
-    );
-  }
 
-  Future<void> _removeStock(String stockDocId, String productId) async {
-    try {
-      // 1. Remove from location's stock
-      await FirebaseFirestore.instance
-          .collection('locations')
-          .doc(_selectedLocationId)
-          .collection('stock')
-          .doc(stockDocId)
-          .delete();
-
-      // 2. Update product's available locations
-      await FirebaseFirestore.instance
-          .collection('products')
-          .doc(productId)
-          .update({
-            'availableLocations': FieldValue.arrayRemove([_selectedLocationId]),
-          });
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Stock item removed')),
-      );
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error removing stock: $e')),
-      );
+        // Clear form
+        _productController.clear();
+        _quantityController.clear();
+        setState(() => _selectedProduct = null);
+        FocusScope.of(context).requestFocus(FocusNode());
+      } catch (e) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error updating stock: ${e.toString()}')),
+        );
+      }
     }
   }
 }
@@ -3414,7 +3701,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Category: ${data.product.category}'),
+                  Text('Category: ${data.product.categoryId}'),
                   Text('Unit price: €${data.product.price.toStringAsFixed(2)}'),
                   const SizedBox(height: 8),
                   const Text('Recent sales:', style: TextStyle(fontWeight: FontWeight.bold)),
@@ -3447,14 +3734,14 @@ class _HistoryScreenState extends State<HistoryScreen> {
     
     for (final sale in sales) {
       for (final product in sale.products) {
-        if (!categoryGroups.containsKey(product.category)) {
-          categoryGroups[product.category] = CategorySalesData(category: product.category);
+        if (!categoryGroups.containsKey(product.categoryId)) {
+          categoryGroups[product.categoryId] = CategorySalesData(category: product.categoryId);
         }
         
-        final quantityInSale = sale.products.where((p) => p.category == product.category).length;
-        categoryGroups[product.category]!.sales.add(sale);
-        categoryGroups[product.category]!.totalQuantity += quantityInSale;
-        categoryGroups[product.category]!.totalAmount += product.price * quantityInSale;
+        final quantityInSale = sale.products.where((p) => p.categoryId == product.categoryId).length;
+        categoryGroups[product.categoryId]!.sales.add(sale);
+        categoryGroups[product.categoryId]!.totalQuantity += quantityInSale;
+        categoryGroups[product.categoryId]!.totalAmount += product.price * quantityInSale;
       }
     }
 
@@ -3576,7 +3863,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
     final productCounts = <Product, int>{};
     
     for (final sale in sales) {
-      for (final product in sale.products.where((p) => p.category == category)) {
+      for (final product in sale.products.where((p) => p.categoryId == category)) {
         productCounts[product] = (productCounts[product] ?? 0) + 1;
       }
     }
@@ -3797,272 +4084,6 @@ class _SalesScreenState extends State<SalesScreen> {
   }
 }
 
-views\agent\stock_screen copy.dart:
-
-# views\agent\stock_screen copy.dart
-import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:provider/provider.dart';
-import 'package:intl/intl.dart';
-import '../../viewmodels/stock_vm.dart';
-import '../../models/product.dart';
-import '../../viewmodels/auth_vm.dart';
-
-class StockScreen extends StatefulWidget {
-  const StockScreen({super.key});
-
-  @override
-  State<StockScreen> createState() => _StockScreenState();
-}
-
-class _StockScreenState extends State<StockScreen> {
-  int _selectedTabIndex = 0;
-
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _loadData();
-    });
-  }
-
-  Future<void> _loadData() async {
-    final authVM = Provider.of<AuthViewModel>(context, listen: false);
-    final stockVM = Provider.of<StockViewModel>(context, listen: false);
-    
-    if (authVM.currentUser?.assignedLocationId != null) {
-      stockVM.loadStock(authVM.currentUser!.assignedLocationId!);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return DefaultTabController(
-      length: 2,
-      child: Scaffold(
-        appBar: AppBar(
-          title: const Text('Stock Management'),
-          bottom: const TabBar(
-            tabs: [
-              Tab(text: 'Current Stock'),
-              Tab(text: 'Stock History'),
-            ],
-          ),
-        ),
-        body: Consumer2<AuthViewModel, StockViewModel>(
-          builder: (context, authVM, stockVM, _) {
-            return _buildBody(authVM, stockVM);
-          },
-        ),
-      ),
-    );
-  }
-
-  Widget _buildBody(AuthViewModel authVM, StockViewModel stockVM) {
-    if (authVM.currentUser == null) {
-      return const Center(child: Text('Please log in'));
-    }
-
-    if (authVM.currentUser!.assignedLocationId == null) {
-      return Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Text('No location assigned to you'),
-          const SizedBox(height: 20),
-          ElevatedButton(
-            onPressed: _loadData,
-            child: const Text('Refresh'),
-          ),
-          const SizedBox(height: 20),
-          Text(
-            'Please contact your administrator to assign a location',
-            style: Theme.of(context).textTheme.bodySmall,
-            textAlign: TextAlign.center,
-          ),
-        ],
-      );
-    }
-
-    return FutureBuilder<DocumentSnapshot>(
-      future: FirebaseFirestore.instance
-          .collection('locations')
-          .doc(authVM.currentUser!.assignedLocationId)
-          .get(),
-      builder: (context, snapshot) {
-        if (!snapshot.hasData) {
-          return const Center(child: CircularProgressIndicator());
-        }
-
-        final location = snapshot.data!.data() as Map<String, dynamic>? ?? {};
-        
-        return TabBarView(
-          children: [
-            _buildCurrentStockTab(stockVM, location),
-            _buildStockHistoryTab(authVM, location),
-          ],
-        );
-      },
-    );
-  }
-
-  Widget _buildCurrentStockTab(StockViewModel stockVM, Map<String, dynamic> location) {
-    if (stockVM.isLoading) {
-      return const Center(child: CircularProgressIndicator());
-    }
-
-    if (stockVM.stock.isEmpty) {
-      return Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Text('No stock available at ${location['name']} (${location['type']})'),
-          const SizedBox(height: 20),
-          ElevatedButton(
-            onPressed: _loadData,
-            child: const Text('Refresh'),
-          ),
-        ],
-      );
-    }
-
-    return RefreshIndicator(
-      onRefresh: _loadData,
-      child: ListView.builder(
-        itemCount: stockVM.stock.keys.length,
-        itemBuilder: (context, index) {
-          final productId = stockVM.stock.keys.elementAt(index);
-          return FutureBuilder<DocumentSnapshot>(
-            future: FirebaseFirestore.instance
-                .collection('products')
-                .doc(productId)
-                .get(),
-            builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                return const ListTile(
-                  title: Text('Loading...'),
-                  leading: CircularProgressIndicator(),
-                );
-              }
-
-              if (snapshot.hasError || !snapshot.hasData) {
-                return ListTile(
-                  title: Text('Product ID: $productId'),
-                  subtitle: Text(snapshot.hasError 
-                    ? 'Error loading product' 
-                    : 'Product not found'),
-                );
-              }
-
-              final product = Product.fromFirestore(snapshot.data!);
-              return ListTile(
-                title: Text(product.name),
-                subtitle: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Quantity: ${stockVM.stock[productId]}'),
-                    if (product.barcode.isNotEmpty)
-                      Text('Barcode: ${product.barcode}',
-                        style: Theme.of(context).textTheme.bodySmall),
-                  ],
-                ),
-                trailing: Text('${product.price.toStringAsFixed(2)} €',
-                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    color: Theme.of(context).primaryColor,
-                  ),
-                ),
-              );
-            },
-          );
-        },
-      ),
-    );
-  }
-
-  Widget _buildStockHistoryTab(AuthViewModel authVM, Map<String, dynamic> location) {
-    return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance
-          .collection('stockHistory')
-          .where('locationId', isEqualTo: authVM.currentUser!.assignedLocationId)
-          .orderBy('timestamp', descending: true)
-          .snapshots(),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
-        }
-
-        if (snapshot.hasError) {
-          debugPrint('Stock history error: ${snapshot.error}');
-          return Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Text('Error loading stock history'),
-                ElevatedButton(
-                  onPressed: _loadData,
-                  child: const Text('Retry'),
-                ),
-              ],
-            ),
-          );
-        }
-
-        if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-          return Center(
-            child: Text('No stock history at ${location['name']}'),
-          );
-        }
-
-        return ListView.builder(
-          itemCount: snapshot.data!.docs.length,
-          itemBuilder: (context, index) {
-            final doc = snapshot.data!.docs[index];
-            final data = doc.data() as Map<String, dynamic>;
-
-            return Card(
-              margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
-              child: ListTile(
-                title: FutureBuilder<DocumentSnapshot>(
-                  future: FirebaseFirestore.instance
-                      .collection('products')
-                      .doc(data['productId'])
-                      .get(),
-                  builder: (context, productSnapshot) {
-                    if (productSnapshot.connectionState == ConnectionState.waiting) {
-                      return const Text('Loading product...');
-                    }
-                    if (!productSnapshot.hasData || !productSnapshot.data!.exists) {
-                      return Text('Product ID: ${data['productId']}');
-                    }
-                    final product = Product.fromFirestore(productSnapshot.data!);
-                    return Text(product.name);
-                  },
-                ),
-                subtitle: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Quantity: ${data['quantity']}'),
-                    Text('Location: ${location['name']} (${location['type']})'),
-                    Text(
-                      DateFormat('dd/MM/yyyy HH:mm').format(
-                        (data['timestamp'] as Timestamp).toDate(),
-                      ),
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                  ],
-                ),
-                trailing: Text(
-                  (data['quantity'] as int) > 0 ? '➕' : '➖',
-                  style: const TextStyle(fontSize: 24),
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-}
-
 views\agent\stock_screen.dart:
 
 # views\agent\stock_screen.dart
@@ -4162,7 +4183,7 @@ class _StockScreenState extends State<StockScreen> with SingleTickerProviderStat
           ),
           const SizedBox(height: 16),
           ElevatedButton(
-            onPressed: _loadData,
+            onPressed:_loadData,
             child: const Text('Refresh'),
           ),
         ],
@@ -4370,10 +4391,48 @@ class _StockScreenState extends State<StockScreen> with SingleTickerProviderStat
                 return Card(
                   margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   child: ListTile(
-                    leading: product?.imageUrl != null
-                        ? Image.network(product!.imageUrl!, width: 50, height: 50)
-                        : const Icon(Icons.shopping_bag),
-                    title: Text(product?.name ?? 'Unknown Product'),
+                    leading: FutureBuilder<DocumentSnapshot>(
+                      future: FirebaseFirestore.instance
+                          .collection('products')
+                          .doc(data['productId'])
+                          .get(),
+                      builder: (context, productSnapshot) {
+                        if (productSnapshot.connectionState == ConnectionState.waiting) {
+                          return const SizedBox(
+                            width: 50,
+                            height: 50,
+                            child: CircularProgressIndicator(),
+                          );
+                        }
+                        
+                        if (!productSnapshot.hasData || !productSnapshot.data!.exists) {
+                          return const Icon(Icons.error, color: Colors.red);
+                        }
+
+                        final product = Product.fromFirestore(productSnapshot.data!);
+                        return product.imageUrl != null
+                            ? Image.network(product.imageUrl!, width: 50, height: 50)
+                            : const Icon(Icons.shopping_bag);
+                      },
+                    ),
+                    title: FutureBuilder<DocumentSnapshot>(
+                      future: FirebaseFirestore.instance
+                          .collection('products')
+                          .doc(data['productId'])
+                          .get(),
+                      builder: (context, productSnapshot) {
+                        if (productSnapshot.connectionState == ConnectionState.waiting) {
+                          return const Text('Loading product...');
+                        }
+                        
+                        if (!productSnapshot.hasData || !productSnapshot.data!.exists) {
+                          return Text('Product ID: ${data['productId']}');
+                        }
+
+                        final product = Product.fromFirestore(productSnapshot.data!);
+                        return Text(product.name);
+                      },
+                    ),
                     subtitle: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -4632,7 +4691,7 @@ class _ProductDetailsCardState extends State<ProductDetailsCard> {
 
     // Get applicable discounts for this product's category
     final applicableDiscounts = discountVM.activeDiscounts
-        .where((d) => d.category == widget.product.category)
+        .where((d) => d.categoryRef == widget.product.categoryRef)
         .toList();
 
     // Get the initially selected discount (if any)
@@ -4691,7 +4750,7 @@ class _ProductDetailsCardState extends State<ProductDetailsCard> {
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        widget.product.category,
+                        widget.product.categoryRef,
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
                           color: Colors.grey[600],
                         ),

@@ -4,21 +4,22 @@ class Product {
   final String id;
   final String name;
   final double price;
-  final String category;
+  final DocumentReference categoryRef;
   final String barcode;
   final String? imageUrl;
   final List<String> availableLocations;
-
-  
+  final DocumentReference? reference;
+ 
 
   Product({
     required this.id,
     required this.name,
     required this.price,
-    required this.category,
+    required this.categoryRef,
     required this.barcode,
     this.imageUrl,
     this.availableLocations = const [],
+    this.reference,
 
   });
 
@@ -28,7 +29,7 @@ class Product {
       id: doc.id,
       name: data['name'] as String? ?? '',
       price: (data['price'] as num?)?.toDouble() ?? 0.0,
-      category: data['category'] as String? ?? '',
+      categoryRef: data['categoryRef'] as DocumentReference,
       barcode: data['barcode'] as String? ?? '',
       imageUrl: data['imageUrl'] as String?,
       availableLocations: List<String>.from(data['availableLocations'] ?? []),
@@ -41,7 +42,7 @@ class Product {
       id: map['id'] as String? ?? '',
       name: map['name'] as String? ?? '',
       price: (map['price'] as num?)?.toDouble() ?? 0.0,
-      category: map['category'] as String? ?? '',
+      categoryRef: map['categoryRef'] as DocumentReference, 
       barcode: map['barcode'] as String? ?? '',
       imageUrl: map['imageUrl'] as String?,
       
@@ -52,7 +53,7 @@ class Product {
     'id': id,
     'name': name,
     'price': price,
-    'category': category,
+    'categoryRef': categoryRef,
     'barcode': barcode,
     'imageUrl': imageUrl, 
     'availableLocations': availableLocations,

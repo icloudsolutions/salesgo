@@ -1,10 +1,11 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../models/product.dart';
 import '../models/discount.dart';
 import 'discount_badge.dart';
 import '../viewmodels/discount_vm.dart';
 import '../viewmodels/sales_vm.dart';
-import 'package:provider/provider.dart';
 
 class ProductDetailsCard extends StatefulWidget {
   final Product product;
@@ -30,7 +31,7 @@ class _ProductDetailsCardState extends State<ProductDetailsCard> {
 
     // Get applicable discounts for this product's category
     final applicableDiscounts = discountVM.activeDiscounts
-        .where((d) => d.category == widget.product.category)
+        .where((d) => d.categoryRef.path == widget.product.categoryRef.path)
         .toList();
 
     // Get the initially selected discount (if any)
@@ -88,11 +89,33 @@ class _ProductDetailsCardState extends State<ProductDetailsCard> {
                         overflow: TextOverflow.ellipsis,
                       ),
                       const SizedBox(height: 4),
-                      Text(
-                        widget.product.category,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: Colors.grey[600],
-                        ),
+                      FutureBuilder<DocumentSnapshot>(
+                        future: widget.product.categoryRef.get(),
+                        builder: (context, snapshot) {
+                          if (snapshot.connectionState == ConnectionState.waiting) {
+                            return Text(
+                              'Loading category...',
+                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                color: Colors.grey[600],
+                              ),
+                            );
+                          }
+                          if (snapshot.hasError) {
+                            return Text(
+                              'Category: Error',
+                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                color: Colors.grey[600],
+                              ),
+                            );
+                          }
+                          final categoryName = snapshot.data?.get('name') ?? 'Uncategorized';
+                          return Text(
+                            'Category: $categoryName',
+                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: Colors.grey[600],
+                            ),
+                          );
+                        },
                       ),
                       if (widget.product.barcode.isNotEmpty)
                         Text(
