@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/material.dart';
 import 'package:salesgo/models/discount.dart';
 import '../models/product.dart';
 import '../models/sale.dart';
@@ -88,7 +89,7 @@ class FirestoreService {
 
       return snapshot.docs.map((doc) => Sale.fromFirestore(doc)).toList();
     } catch (e) {
-      print('Error fetching sales: $e');
+      debugPrint('Error fetching sales: $e');
       return []; // Return empty list on error
     }
   }

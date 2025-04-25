@@ -112,17 +112,39 @@ class _HistoryScreenState extends State<HistoryScreen> {
         title: const Text('Sales History'),
         actions: [
           PopupMenuButton<String>(
+            icon: const Icon(Icons.filter_alt),
+            tooltip: 'Group by',
             onSelected: (value) => setState(() => _groupBy = value),
-            itemBuilder: (context) => [
-              const PopupMenuItem(value: 'none', child: Text('No grouping')),
-              const PopupMenuItem(value: 'product', child: Text('Group by product')),
-              const PopupMenuItem(value: 'category', child: Text('Group by category')),
-              const PopupMenuItem(value: 'discount', child: Text('Group by discount')),
-              const PopupMenuItem(value: 'payment', child: Text('Group by payment method')),
-            ],
+            itemBuilder: (context) {
+              final options = {
+                'none': 'No grouping',
+                'product': 'Group by product',
+                'category': 'Group by category',
+                'discount': 'Group by discount',
+                'payment': 'Group by payment method',
+              };
+
+              return options.entries.map((entry) {
+                return PopupMenuItem<String>(
+                  value: entry.key,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(entry.value),
+                      if (_groupBy == entry.key)
+                        const Icon(Icons.check, color: Colors.blueAccent),
+                    ],
+                  ),
+                );
+              }).toList();
+            },
           ),
+
           DropdownButton<String>(
             value: _selectedFilter,
+            icon: const Icon(Icons.date_range),
+            style: const TextStyle(color: Color.fromARGB(255, 0, 0, 0)),
+            dropdownColor: const Color.fromARGB(255, 255, 255, 255),            
             items: const [
               DropdownMenuItem(value: 'day', child: Text('Today')),
               DropdownMenuItem(value: 'week', child: Text('This Week')),
@@ -185,19 +207,31 @@ class _HistoryScreenState extends State<HistoryScreen> {
     final productGroups = <String, ProductSalesData>{};
     
     for (final sale in sales) {
+      final productsInSale = <String, int>{}; // <productId, quantity>
+
       for (final product in sale.products) {
-        final productId = product.id;
+        productsInSale.update(product.id, (value) => value + 1, ifAbsent: () => 1);
+      }
+
+      for (final entry in productsInSale.entries) {
+        final productId = entry.key;
+        final quantity = entry.value;
+        final product = sale.products.firstWhere((p) => p.id == productId);
+
         productGroups.putIfAbsent(productId, () => ProductSalesData(
           product: product,
           sales: [],
         ));
-        
-        final quantity = sale.products.where((p) => p.id == productId).length;
+
+        // Ajoute une seule fois la vente
         productGroups[productId]!.sales.add(sale);
+
+        // Calcule correctement la quantité
         productGroups[productId]!.totalQuantity += quantity;
         productGroups[productId]!.totalAmount += product.price * quantity;
       }
     }
+
 
     return ListView(
       children: productGroups.entries.map((entry) {
@@ -224,7 +258,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                       return const Text('Category: Loading...');
                     },
                   ),
-                  Text('Category: ${data.product.categoryRef}'),
+                  //Text('Category: ${data.product.categoryRef}'),
                   Text('Unit price: €${data.product.price.toStringAsFixed(2)}'),
                   const SizedBox(height: 8),
                   const Text('Recent sales:', style: TextStyle(fontWeight: FontWeight.bold)),
@@ -257,28 +291,32 @@ Widget _buildGroupedByCategory(List<Sale> sales) {
   
   // Group sales by category
   for (final sale in sales) {
+    final categoryQuantities = <String, int>{};
+    final categoryAmounts = <String, double>{};
+    final productsByCategory = <String, Product>{};
+
     for (final product in sale.products) {
       final categoryId = product.categoryRef.id;
+
+      categoryQuantities.update(categoryId, (value) => value + 1, ifAbsent: () => 1);
+      categoryAmounts.update(categoryId, (value) => value + product.price, ifAbsent: () => product.price);
       
-      // Initialize category group if not exists
-      if (!categoryGroups.containsKey(categoryId)) {
-        categoryGroups[categoryId] = CategorySalesData(
-          categoryId: categoryId,
-          sales: [],
-        );
-      }
-      
-      // Calculate quantity of products in this category for this sale
-      final quantityInSale = sale.products
-          .where((p) => p.categoryRef.id == categoryId)
-          .length;
-      
-      // Update category group data
+      // Sauvegarder un produit par catégorie pour le prix (on peut en prendre un arbitraire)
+      productsByCategory[categoryId] = product;
+    }
+
+    for (final categoryId in categoryQuantities.keys) {
+      categoryGroups.putIfAbsent(categoryId, () => CategorySalesData(
+        categoryId: categoryId,
+        sales: [],
+      ));
+
       categoryGroups[categoryId]!.sales.add(sale);
-      categoryGroups[categoryId]!.totalQuantity += quantityInSale;
-      categoryGroups[categoryId]!.totalAmount += product.price * quantityInSale;
+      categoryGroups[categoryId]!.totalQuantity += categoryQuantities[categoryId]!;
+      categoryGroups[categoryId]!.totalAmount += categoryAmounts[categoryId]!;
     }
   }
+
 
   return ListView(
     children: categoryGroups.entries.map((entry) {
