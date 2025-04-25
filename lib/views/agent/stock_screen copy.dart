@@ -107,9 +107,7 @@ class _StockScreenState extends State<StockScreen> with SingleTickerProviderStat
       return const Center(child: CircularProgressIndicator());
     }
 
-    final adjustedStock = stockVM.adjustedStock;
-
-    if (adjustedStock.isEmpty) {
+    if (stockVM.stock.isEmpty) {
       return FutureBuilder<DocumentSnapshot>(
         future: FirebaseFirestore.instance
             .collection('locations')
@@ -135,7 +133,7 @@ class _StockScreenState extends State<StockScreen> with SingleTickerProviderStat
                 const Text('Scan products to add stock'),
                 const SizedBox(height: 16),
                 ElevatedButton(
-                  onPressed: () => stockVM.loadStock(authVM.currentUser!.assignedLocationId!),
+                  onPressed: _loadData,
                   child: const Text('Refresh'),
                 ),
               ],
@@ -146,12 +144,12 @@ class _StockScreenState extends State<StockScreen> with SingleTickerProviderStat
     }
 
     return RefreshIndicator(
-      onRefresh: () async => stockVM.loadStock(authVM.currentUser!.assignedLocationId!),
+      onRefresh: _loadData,
       child: ListView.builder(
-        itemCount: adjustedStock.keys.length,
+        itemCount: stockVM.stock.keys.length,
         itemBuilder: (context, index) {
-          final productId = adjustedStock.keys.elementAt(index);
-          final quantity = adjustedStock[productId] ?? 0;
+          final productId = stockVM.stock.keys.elementAt(index);
+          final quantity = stockVM.stock[productId] ?? 0;
 
           return FutureBuilder<DocumentSnapshot>(
             future: FirebaseFirestore.instance
@@ -185,9 +183,7 @@ class _StockScreenState extends State<StockScreen> with SingleTickerProviderStat
                   subtitle: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Available: $quantity'),
-                      Text('Initial stock: ${stockVM.stock[productId] ?? 0}'),
-                      Text('Sold this month: ${stockVM.monthlySales[productId] ?? 0}'),
+                      Text('Quantity: $quantity'),
                       if (product.barcode.isNotEmpty)
                         Text('Barcode: ${product.barcode}'),
                     ],

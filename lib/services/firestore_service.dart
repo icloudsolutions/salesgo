@@ -41,6 +41,24 @@ class FirestoreService {
     await _firestore.collection('sales').add(sale.toMap());
   }
 
+  Stream<Map<String, int>> getMonthlySales(String locationId, DateTime firstDayOfMonth) {
+    return FirebaseFirestore.instance
+        .collection('sales')
+        .where('locationId', isEqualTo: locationId)
+        .where('timestamp', isGreaterThanOrEqualTo: firstDayOfMonth)
+        .snapshots()
+        .map((snapshot) {
+          final monthlySales = <String, int>{};
+          for (final doc in snapshot.docs) {
+            final sale = doc.data() as Map<String, dynamic>;
+            final productId = sale['productId'] as String;
+            final quantity = sale['quantity'] as int;
+            monthlySales[productId] = (monthlySales[productId] ?? 0) + quantity;
+          }
+          return monthlySales;
+        });
+  }  
+
   // Stocks
   Stream<Map<String, int>> getLocationStock(String locationId) {
     return _firestore.collection('locations/$locationId/stock')

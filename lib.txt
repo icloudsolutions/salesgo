@@ -390,23 +390,7 @@ class Discount {
     }
   }
 
-  /// Creates a Discount from a Map (useful for testing or other data sources)
-  factory Discount.fromMap(Map<String, dynamic> data, {DocumentReference? ref}) {
-    try {
-      return Discount(
-        id: data['id'] as String,
-        categoryRef: data['categoryRef'] as DocumentReference,
-        startDate: (data['startDate'] as Timestamp).toDate(),
-        endDate: (data['endDate'] as Timestamp).toDate(),
-        value: (data['value'] as num).toDouble(),
-        type: data['type'] as String,
-        name: data['name'] as String? ?? '',
-        reference: ref,
-      );
-    } catch (e) {
-      throw FormatException('Failed to create Discount from map: $e');
-    }
-  }
+
 
   /// Converts the Discount to a Map for Firestore
   Map<String, dynamic> toMap() {
@@ -765,6 +749,7 @@ services\firestore_service.dart:
 
 # services\firestore_service.dart
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/material.dart';
 import 'package:salesgo/models/discount.dart';
 import '../models/product.dart';
 import '../models/sale.dart';
@@ -854,7 +839,7 @@ class FirestoreService {
 
       return snapshot.docs.map((doc) => Sale.fromFirestore(doc)).toList();
     } catch (e) {
-      print('Error fetching sales: $e');
+      debugPrint('Error fetching sales: $e');
       return []; // Return empty list on error
     }
   }
@@ -1044,6 +1029,7 @@ class AuthViewModel with ChangeNotifier {
 viewmodels\discount_vm.dart:
 
 # viewmodels\discount_vm.dart
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import '../services/firestore_service.dart';
 import '../models/discount.dart';
@@ -1154,6 +1140,10 @@ class DiscountViewModel with ChangeNotifier {
     _error = null;
     notifyListeners();
   }
+}
+
+extension on List<Discount> {
+  get docs => null;
 }
 
 viewmodels\sales_vm.dart:
@@ -1807,6 +1797,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:intl/intl.dart';
 import 'package:salesgo/models/product.dart';
 import 'package:salesgo/models/discount.dart';
 import 'package:salesgo/models/category.dart';
@@ -2075,14 +2066,17 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
 
     setState(() => _isLoading = true);
     try {
+      final categoryRef = FirebaseFirestore.instance
+          .collection('categories')
+          .doc(_selectedDiscountCategory);
+
       final discountData = {
         'id': FirebaseFirestore.instance.collection('discounts').doc().id,
         'name': _discountNameController.text,
-        'category': _selectedDiscountCategory!,
+        'categoryRef': categoryRef,  // Store DocumentReference
         'value': double.parse(_discountValueController.text),
         'type': _discountTypeController.text,
         'hasDateRange': _hasDateRange,
-        // Only store dates if range enabled
         if (_hasDateRange) 'startDate': _discountStartDate!,
         if (_hasDateRange) 'endDate': _discountEndDate!,
       };
@@ -2145,9 +2139,13 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
 
     setState(() => _isLoading = true);
     try {
+      final categoryRef = FirebaseFirestore.instance
+          .collection('categories')
+          .doc(_selectedDiscountCategory);
+
       final updateData = {
         'name': _discountNameController.text,
-        'category': _selectedDiscountCategory!,
+        'categoryRef': categoryRef,  // Store DocumentReference
         'value': double.parse(_discountValueController.text),
         'type': _discountTypeController.text,
         'hasDateRange': _hasDateRange,
@@ -2186,8 +2184,11 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
     _discountNameController.text = data['name'] ?? '';
     _discountValueController.text = data['value'].toString();
     _discountTypeController.text = data['type'];
-    _selectedDiscountCategory = data['category'];
-    
+    // Get the category ID from the DocumentReference
+    final categoryRef = data['categoryRef'] as DocumentReference;
+    final categorySnapshot = await categoryRef.get();
+    _selectedDiscountCategory = categorySnapshot.id;    
+
     setState(() {
       _hasDateRange = data['hasDateRange'] ?? false;
       if (_hasDateRange) {
@@ -2244,11 +2245,11 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
           .doc(discountId)
           .delete();
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Discount deleted')),
+        const SnackBar(content: Text('Discount deleted successfully')),
       );
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error deleting discount: $e')),
+        SnackBar(content: Text('Error deleting discount: ${e.toString()}')),
       );
     }
   }
@@ -2284,7 +2285,11 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
   Future<void> _editProduct(Product product) async {
     _nameController.text = product.name;
     _priceController.text = product.price.toString();
-    _selectedProductCategory = product.categoryId;
+    
+    // Get the category ID from the DocumentReference
+    final categorySnapshot = await product.categoryRef.get();
+    _selectedProductCategory = categorySnapshot.id;
+    
     _barcodeController.text = product.barcode;
     setState(() => _imageUrl = product.imageUrl);
 
@@ -2386,27 +2391,44 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
             itemCount: snapshot.data!.docs.length,
             itemBuilder: (context, index) {
               final doc = snapshot.data!.docs[index];
-              final product = Product.fromMap(doc.data() as Map<String, dynamic>, doc.id);
+              final product = Product.fromFirestore(doc);
               
-              return ListTile(
-                leading: product.imageUrl != null 
-                    ? Image.network(product.imageUrl!, width: 50, height: 50)
-                    : const Icon(Icons.shopping_bag),
-                title: Text(product.name),
-                subtitle: Text('€${product.price} - ${product.categoryId}'),
-                trailing: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    IconButton(
-                      icon: const Icon(Icons.edit),
-                      onPressed: () => _editProduct(product),
+              return FutureBuilder<DocumentSnapshot>(
+                future: product.categoryRef.get(),
+                builder: (context, categorySnapshot) {
+                  if (!categorySnapshot.hasData) {
+                    return ListTile(
+                      leading: product.imageUrl != null 
+                          ? Image.network(product.imageUrl!, width: 50, height: 50)
+                          : const Icon(Icons.shopping_bag),
+                      title: Text(product.name),
+                      subtitle: Text('€${product.price} - Loading category...'),
+                    );
+                  }
+                  
+                  final categoryName = categorySnapshot.data!['name'] ?? 'Unknown';
+                  
+                  return ListTile(
+                    leading: product.imageUrl != null 
+                        ? Image.network(product.imageUrl!, width: 50, height: 50)
+                        : const Icon(Icons.shopping_bag),
+                    title: Text(product.name),
+                    subtitle: Text('€${product.price} - $categoryName'),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.edit),
+                          onPressed: () => _editProduct(product),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.delete),
+                          onPressed: () => _deleteProduct(doc.id),
+                        ),
+                      ],
                     ),
-                    IconButton(
-                      icon: const Icon(Icons.delete),
-                      onPressed: () => _deleteProduct(doc.id),
-                    ),
-                  ],
-                ),
+                  );
+                },
               );
             },
           );
@@ -2453,47 +2475,83 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
   }
 
   // Update the _buildDiscountsTab method to show date range info
-  // Update the _buildDiscountsTab method to show date range info
   Widget _buildDiscountsTab() {
     return Padding(
       padding: const EdgeInsets.all(16.0),
       child: StreamBuilder<QuerySnapshot>(
         stream: FirebaseFirestore.instance.collection('discounts').snapshots(),
         builder: (context, snapshot) {
-          if (!snapshot.hasData) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
+
+          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+            return const Center(
+              child: Text(
+                'No discounts available',
+                style: TextStyle(fontSize: 16),
+              ),
+            );
+          }
+
           return ListView.builder(
             itemCount: snapshot.data!.docs.length,
             itemBuilder: (context, index) {
               final doc = snapshot.data!.docs[index];
-              final data = doc.data() as Map<String, dynamic>;
-              final hasDateRange = data['hasDateRange'] ?? false;
-              String dateText = 'No date range';
-              
-              if (hasDateRange && data['startDate'] != null && data['endDate'] != null) {
-                final startDate = (data['startDate'] as Timestamp).toDate();
-                final endDate = (data['endDate'] as Timestamp).toDate();
-                dateText = '${_formatDate(startDate)} to ${_formatDate(endDate)}';
-              }
-              
-              return ListTile(
-                leading: const Icon(Icons.discount),
-                title: Text('${data['name']} - ${data['value']}${data['type']} (${data['category']})'),
-                subtitle: Text(dateText),
-                trailing: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    IconButton(
-                      icon: const Icon(Icons.edit),
-                      onPressed: () => _editDiscount(doc),
+              final discount = Discount.fromFirestore(doc);
+
+              return FutureBuilder<DocumentSnapshot>(
+                future: discount.categoryRef.get(),
+                builder: (context, categorySnapshot) {
+                  final categoryName = categorySnapshot.hasData
+                      ? categorySnapshot.data!.get('name') ?? 'Unknown Category'
+                      : 'Loading...';
+
+                  return Card(
+                    margin: const EdgeInsets.symmetric(vertical: 8),
+                    child: ListTile(
+                      leading: const Icon(Icons.discount, color: Colors.orange),
+                      title: Text(discount.name),
+                      subtitle: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Category: $categoryName'),
+                          Text(
+                            '${discount.value}${discount.type} discount',
+                            style: const TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                          Text(
+                            'Valid: ${DateFormat('MMM dd').format(discount.startDate)} - '
+                            '${DateFormat('MMM dd, yyyy').format(discount.endDate)}',
+                          ),
+                          if (discount.isActive)
+                            Chip(
+                              label: const Text('Active'),
+                              backgroundColor: Colors.green[100],
+                            )
+                          else
+                            Chip(
+                              label: const Text('Expired'),
+                              backgroundColor: Colors.red[100],
+                            ),
+                        ],
+                      ),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.edit),
+                            onPressed: () => _editDiscount(doc),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.delete, color: Colors.red),
+                            onPressed: () => _deleteDiscount(doc.id),
+                          ),
+                        ],
+                      ),
                     ),
-                    IconButton(
-                      icon: const Icon(Icons.delete),
-                      onPressed: () => _deleteDiscount(doc.id),
-                    ),
-                  ],
-                ),
+                  );
+                },
               );
             },
           );
@@ -2616,53 +2674,53 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
   }
 
   // Update the _buildDiscountForm method
-  Widget _buildDiscountForm({bool isEditing = false, String? discountId}) {
-    return StatefulBuilder(
-      builder: (BuildContext context, StateSetter setDialogState) {
-        return AlertDialog(
-          title: Text(isEditing ? 'Edit Discount' : 'Add New Discount'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextFormField(
-                  controller: _discountNameController,
-                  decoration: const InputDecoration(labelText: 'Discount Name'),
-                  validator: (value) => value!.isEmpty ? 'Required' : null,
-                ),
-                TextFormField(
-                  controller: _discountValueController,
-                  decoration: const InputDecoration(labelText: 'Value'),
-                  keyboardType: TextInputType.number,
-                  validator: (value) => value!.isEmpty ? 'Required' : null,
-                ),
-                TextFormField(
-                  controller: _discountTypeController,
-                  decoration: const InputDecoration(labelText: 'Type (e.g., %, \$)'),
-                  validator: (value) => value!.isEmpty ? 'Required' : null,
-                ),
-                StreamBuilder<QuerySnapshot>(
-                  stream: FirebaseFirestore.instance.collection('categories').snapshots(),
-                  builder: (context, snapshot) {
-                    if (!snapshot.hasData) return const SizedBox();
-                    
-                    final categories = snapshot.data!.docs.map((doc) {
-                      return DropdownMenuItem<String>(
-                        value: doc['name'],
-                        child: Text(doc['name']),
-                      );
-                    }).toList();
-                    
-                    return DropdownButtonFormField<String>(
-                      value: _selectedDiscountCategory,
-                      decoration: const InputDecoration(labelText: 'Category'),
-                      items: categories,
-                      onChanged: (value) {
-                        setDialogState(() {
-                          _selectedDiscountCategory = value;
-                        });
-                      },
-                      validator: (value) => value == null ? 'Please select a category' : null,
+Widget _buildDiscountForm({bool isEditing = false, String? discountId}) {
+  return StatefulBuilder(
+    builder: (BuildContext context, StateSetter setDialogState) {
+      return AlertDialog(
+        title: Text(isEditing ? 'Edit Discount' : 'Add New Discount'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextFormField(
+                controller: _discountNameController,
+                decoration: const InputDecoration(labelText: 'Discount Name'),
+                validator: (value) => value!.isEmpty ? 'Required' : null,
+              ),
+              TextFormField(
+                controller: _discountValueController,
+                decoration: const InputDecoration(labelText: 'Value'),
+                keyboardType: TextInputType.number,
+                validator: (value) => value!.isEmpty ? 'Required' : null,
+              ),
+              TextFormField(
+                controller: _discountTypeController,
+                decoration: const InputDecoration(labelText: 'Type (e.g., %, \$)'),
+                validator: (value) => value!.isEmpty ? 'Required' : null,
+              ),
+              StreamBuilder<QuerySnapshot>(
+                stream: FirebaseFirestore.instance.collection('categories').snapshots(),
+                builder: (context, snapshot) {
+                  if (!snapshot.hasData) return const SizedBox();
+                  
+                  final categories = snapshot.data!.docs.map((doc) {
+                    return DropdownMenuItem<String>(
+                      value: doc.id,  // Use document ID instead of name
+                      child: Text(doc['name']),
+                    );
+                  }).toList();
+                  
+                  return DropdownButtonFormField<String>(
+                    value: _selectedDiscountCategory,
+                    decoration: const InputDecoration(labelText: 'Category'),
+                    items: categories,
+                    onChanged: (value) {
+                      setDialogState(() {
+                        _selectedDiscountCategory = value;
+                      });
+                    },
+                    validator: (value) => value == null ? 'Please select a category' : null,
                     );
                   },
                 ),
@@ -3471,21 +3529,22 @@ class ProductSalesData {
     List<Sale>? sales,
     this.totalQuantity = 0,
     this.totalAmount = 0.0,
-  }) : sales = sales ?? []; // Initialize with modifiable list
+  }) : sales = sales ?? [];
 }
 
 class CategorySalesData {
   final List<Sale> sales;
   int totalQuantity;
   double totalAmount;
-  final String category;
+  final String categoryId;
+  String? categoryName;
 
   CategorySalesData({
-    required this.category,
+    required this.categoryId,
     List<Sale>? sales,
     this.totalQuantity = 0,
     this.totalAmount = 0.0,
-  }): sales = sales ?? [];
+  }) : sales = sales ?? [];
 }
 
 class DiscountSalesData {
@@ -3499,7 +3558,7 @@ class DiscountSalesData {
     List<Sale>? sales,
     this.totalQuantity = 0,
     this.totalAmount = 0.0,
-  }): sales = sales ?? [];
+  }) : sales = sales ?? [];
 }
 
 class HistoryScreen extends StatefulWidget {
@@ -3511,7 +3570,7 @@ class HistoryScreen extends StatefulWidget {
 
 class _HistoryScreenState extends State<HistoryScreen> {
   String _selectedFilter = 'day';
-  String _groupBy = 'product'; // 'none', 'product', 'payment', 'category', 'discount'
+  String _groupBy = 'product';
   late DateTimeRange _dateRange;
 
   @override
@@ -3563,50 +3622,48 @@ class _HistoryScreenState extends State<HistoryScreen> {
         title: const Text('Sales History'),
         actions: [
           PopupMenuButton<String>(
-            icon: const Icon(Icons.filter_list),
-            onSelected: (value) {
-              setState(() {
-                _groupBy = value;
-              });
+            icon: const Icon(Icons.filter_alt),
+            tooltip: 'Group by',
+            onSelected: (value) => setState(() => _groupBy = value),
+            itemBuilder: (context) {
+              final options = {
+                'none': 'No grouping',
+                'product': 'Group by product',
+                'category': 'Group by category',
+                'discount': 'Group by discount',
+                'payment': 'Group by payment method',
+              };
+
+              return options.entries.map((entry) {
+                return PopupMenuItem<String>(
+                  value: entry.key,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(entry.value),
+                      if (_groupBy == entry.key)
+                        const Icon(Icons.check, color: Colors.blueAccent),
+                    ],
+                  ),
+                );
+              }).toList();
             },
-            itemBuilder: (context) => [
-              const PopupMenuItem(
-                value: 'none',
-                child: Text('No grouping'),
-              ),
-              const PopupMenuItem(
-                value: 'product',
-                child: Text('Group by product'),
-              ),
-              const PopupMenuItem(
-                value: 'category',
-                child: Text('Group by category'),
-              ),
-              const PopupMenuItem(
-                value: 'discount',
-                child: Text('Group by discount'),
-              ),
-              const PopupMenuItem(
-                value: 'payment',
-                child: Text('Group by payment method'),
-              ),
-            ],
           ),
+
           DropdownButton<String>(
             value: _selectedFilter,
+            icon: const Icon(Icons.date_range),
+            style: const TextStyle(color: Color.fromARGB(255, 0, 0, 0)),
+            dropdownColor: const Color.fromARGB(255, 255, 255, 255),            
             items: const [
               DropdownMenuItem(value: 'day', child: Text('Today')),
               DropdownMenuItem(value: 'week', child: Text('This Week')),
               DropdownMenuItem(value: 'month', child: Text('This Month')),
             ],
-            onChanged: (value) {
-              if (value != null) {
-                setState(() {
-                  _selectedFilter = value;
-                  _updateDateRange();
-                });
-              }
-            },
+            onChanged: (value) => setState(() {
+              _selectedFilter = value!;
+              _updateDateRange();
+            }),
           ),
         ],
       ),
@@ -3623,10 +3680,6 @@ class _HistoryScreenState extends State<HistoryScreen> {
             return const Center(child: CircularProgressIndicator());
           }
 
-          if (snapshot.hasError) {
-            return Center(child: Text('Error: ${snapshot.error}'));
-          }
-
           if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
             return const Center(child: Text('No sales found'));
           }
@@ -3641,18 +3694,12 @@ class _HistoryScreenState extends State<HistoryScreen> {
           }).whereType<Sale>().toList();
 
           switch (_groupBy) {
-            case 'none':
-              return _buildSalesList(sales);
-            case 'product':
-              return _buildGroupedByProduct(sales);
-            case 'category':
-              return _buildGroupedByCategory(sales);
-            case 'discount':
-              return _buildGroupedByDiscount(sales);
-            case 'payment':
-              return _buildGroupedByPayment(sales);
-            default:
-              return _buildSalesList(sales);
+            case 'none': return _buildSalesList(sales);
+            case 'product': return _buildGroupedByProduct(sales);
+            case 'category': return _buildGroupedByCategory(sales);
+            case 'discount': return _buildGroupedByDiscount(sales);
+            case 'payment': return _buildGroupedByPayment(sales);
+            default: return _buildSalesList(sales);
           }
         },
       ),
@@ -3670,25 +3717,35 @@ class _HistoryScreenState extends State<HistoryScreen> {
     final productGroups = <String, ProductSalesData>{};
     
     for (final sale in sales) {
+      final productsInSale = <String, int>{}; // <productId, quantity>
+
       for (final product in sale.products) {
-        if (!productGroups.containsKey(product.id)) {
-          productGroups[product.id] = ProductSalesData(
-            product: product,
-            sales: [], // Explicitly create new modifiable list
-          );
-        }
-        
-        final quantityInSale = sale.products.where((p) => p.id == product.id).length;
-        productGroups[product.id]!.sales.add(sale); // Now this will work
-        productGroups[product.id]!.totalQuantity += quantityInSale;
-        productGroups[product.id]!.totalAmount += product.price * quantityInSale;
+        productsInSale.update(product.id, (value) => value + 1, ifAbsent: () => 1);
+      }
+
+      for (final entry in productsInSale.entries) {
+        final productId = entry.key;
+        final quantity = entry.value;
+        final product = sale.products.firstWhere((p) => p.id == productId);
+
+        productGroups.putIfAbsent(productId, () => ProductSalesData(
+          product: product,
+          sales: [],
+        ));
+
+        // Ajoute une seule fois la vente
+        productGroups[productId]!.sales.add(sale);
+
+        // Calcule correctement la quantité
+        productGroups[productId]!.totalQuantity += quantity;
+        productGroups[productId]!.totalAmount += product.price * quantity;
       }
     }
+
 
     return ListView(
       children: productGroups.entries.map((entry) {
         final data = entry.value;
-        
         return ExpansionTile(
           leading: data.product.imageUrl != null 
               ? Image.network(data.product.imageUrl!, width: 40, height: 40)
@@ -3701,7 +3758,17 @@ class _HistoryScreenState extends State<HistoryScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Category: ${data.product.categoryId}'),
+                  FutureBuilder<DocumentSnapshot>(
+                    future: data.product.categoryRef.get(),
+                    builder: (context, snapshot) {
+                      if (snapshot.hasData) {
+                        final category = snapshot.data!.get('name') ?? 'Uncategorized';
+                        return Text('Category: $category');
+                      }
+                      return const Text('Category: Loading...');
+                    },
+                  ),
+                  //Text('Category: ${data.product.categoryRef}'),
                   Text('Unit price: €${data.product.price.toStringAsFixed(2)}'),
                   const SizedBox(height: 8),
                   const Text('Recent sales:', style: TextStyle(fontWeight: FontWeight.bold)),
@@ -3729,62 +3796,155 @@ class _HistoryScreenState extends State<HistoryScreen> {
     );
   }
 
-  Widget _buildGroupedByCategory(List<Sale> sales) {
-    final categoryGroups = <String, CategorySalesData>{};
-    
-    for (final sale in sales) {
-      for (final product in sale.products) {
-        if (!categoryGroups.containsKey(product.categoryId)) {
-          categoryGroups[product.categoryId] = CategorySalesData(category: product.categoryId);
-        }
-        
-        final quantityInSale = sale.products.where((p) => p.categoryId == product.categoryId).length;
-        categoryGroups[product.categoryId]!.sales.add(sale);
-        categoryGroups[product.categoryId]!.totalQuantity += quantityInSale;
-        categoryGroups[product.categoryId]!.totalAmount += product.price * quantityInSale;
-      }
+Widget _buildGroupedByCategory(List<Sale> sales) {
+  final categoryGroups = <String, CategorySalesData>{};
+  
+  // Group sales by category
+  for (final sale in sales) {
+    final categoryQuantities = <String, int>{};
+    final categoryAmounts = <String, double>{};
+    final productsByCategory = <String, Product>{};
+
+    for (final product in sale.products) {
+      final categoryId = product.categoryRef.id;
+
+      categoryQuantities.update(categoryId, (value) => value + 1, ifAbsent: () => 1);
+      categoryAmounts.update(categoryId, (value) => value + product.price, ifAbsent: () => product.price);
+      
+      // Sauvegarder un produit par catégorie pour le prix (on peut en prendre un arbitraire)
+      productsByCategory[categoryId] = product;
     }
 
-    return ListView(
-      children: categoryGroups.entries.map((entry) {
-        final data = entry.value;
-        
-        return ExpansionTile(
-          leading: const Icon(Icons.category),
-          title: Text(data.category),
-          subtitle: Text('${data.totalQuantity} items - Total: €${data.totalAmount.toStringAsFixed(2)}'),
-          children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('Top products:', style: TextStyle(fontWeight: FontWeight.bold)),
-                  ..._getTopProductsInCategory(sales, data.category).take(3).map((product) {
-                    return ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: Text(product.name),
-                      trailing: Text('€${product.price.toStringAsFixed(2)}'),
-                    );
-                  }).toList(),
-                  const SizedBox(height: 8),
-                  const Text('Recent sales:', style: TextStyle(fontWeight: FontWeight.bold)),
-                  ...data.sales.take(3).map((sale) {
-                    return ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      title: Text('Sale #${sale.id.substring(0, 6)}'),
-                      subtitle: Text(DateFormat('MMM dd, HH:mm').format(sale.date)),
-                      trailing: Text('€${sale.totalAmount.toStringAsFixed(2)}'),
-                    );
-                  }).toList(),
-                ],
-              ),
-            ),
-          ],
-        );
-      }).toList(),
-    );
+    for (final categoryId in categoryQuantities.keys) {
+      categoryGroups.putIfAbsent(categoryId, () => CategorySalesData(
+        categoryId: categoryId,
+        sales: [],
+      ));
+
+      categoryGroups[categoryId]!.sales.add(sale);
+      categoryGroups[categoryId]!.totalQuantity += categoryQuantities[categoryId]!;
+      categoryGroups[categoryId]!.totalAmount += categoryAmounts[categoryId]!;
+    }
   }
+
+
+  return ListView(
+    children: categoryGroups.entries.map((entry) {
+      final data = entry.value;
+      
+      return FutureBuilder<DocumentSnapshot>(
+        future: data.categoryId.contains('/')
+            ? FirebaseFirestore.instance.doc(data.categoryId).get()
+            : FirebaseFirestore.instance.collection('categories').doc(data.categoryId).get(),
+        builder: (context, snapshot) {
+          // Get category name or fallback
+          final categoryName = snapshot.hasData 
+              ? snapshot.data!.get('name') ?? 'Uncategorized'
+              : 'Loading...';
+          
+          return ExpansionTile(
+            leading: const Icon(Icons.category),
+            title: Text(categoryName),
+            subtitle: Text(
+              '${data.totalQuantity} items - Total: €${data.totalAmount.toStringAsFixed(2)}',
+            ),
+            children: [
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Top products:',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 8),
+                    FutureBuilder<List<Product>>(
+                      future: _getTopProductsInCategory(sales, data.categoryId),
+                      builder: (context, productSnapshot) {
+                        if (!productSnapshot.hasData) {
+                          return const CircularProgressIndicator();
+                        }
+                        return Column(
+                          children: productSnapshot.data!.take(3).map((product) {
+                            return ListTile(
+                              contentPadding: EdgeInsets.zero,
+                              leading: product.imageUrl != null
+                                  ? Image.network(
+                                      product.imageUrl!,
+                                      width: 40,
+                                      height: 40,
+                                    )
+                                  : const Icon(Icons.shopping_bag),
+                              title: Text(product.name),
+                              subtitle: Text('€${product.price.toStringAsFixed(2)}'),
+                            );
+                          }).toList(),
+                        );
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                    const Text(
+                      'Recent sales:',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    ...data.sales.take(3).map((sale) {
+                      final quantityInCategory = sale.products
+                          .where((p) => p.categoryRef.id == data.categoryId)
+                          .length;
+                      final amountInCategory = sale.products
+                          .where((p) => p.categoryRef.id == data.categoryId)
+                          .fold(0.0, (sum, p) => sum + p.price);
+                      
+                      return ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: Text('Sale #${sale.id.substring(0, 6)}'),
+                        subtitle: Text(
+                          DateFormat('MMM dd, HH:mm').format(sale.date),
+                        ),
+                        trailing: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text('$quantityInCategory items'),
+                            Text('€${amountInCategory.toStringAsFixed(2)}'),
+                          ],
+                        ),
+                      );
+                    }).toList(),
+                    if (data.sales.length > 3)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8.0),
+                        child: Text(
+                          '+ ${data.sales.length - 3} more transactions',
+                          style: TextStyle(color: Colors.grey[600]),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          );
+        },
+      );
+    }).toList(),
+  );
+}
+
+Future<List<Product>> _getTopProductsInCategory(List<Sale> sales, String categoryId) async {
+  final productCounts = <Product, int>{};
+  
+  for (final sale in sales) {
+    for (final product in sale.products.where((p) => p.categoryRef.id == categoryId)) {
+      productCounts[product] = (productCounts[product] ?? 0) + 1;
+    }
+  }
+  
+  // Sort products by count in descending order
+  final sortedProducts = productCounts.entries.toList()
+    ..sort((a, b) => b.value.compareTo(a.value));
+  
+  return sortedProducts.map((entry) => entry.key).toList();
+}
 
   Widget _buildGroupedByDiscount(List<Sale> sales) {
     final discountGroups = <String, DiscountSalesData>{};
@@ -3859,23 +4019,6 @@ class _HistoryScreenState extends State<HistoryScreen> {
     );
   }
 
-  List<Product> _getTopProductsInCategory(List<Sale> sales, String category) {
-    final productCounts = <Product, int>{};
-    
-    for (final sale in sales) {
-      for (final product in sale.products.where((p) => p.categoryId == category)) {
-        productCounts[product] = (productCounts[product] ?? 0) + 1;
-      }
-    }
-    
-    // Convert to list of entries
-    final sortedEntries = productCounts.entries.toList()
-      // Sort in descending order of count
-      ..sort((a, b) => b.value.compareTo(a.value));
-    
-    // Extract just the Product objects
-    return sortedEntries.map((entry) => entry.key).toList();
-  }
 }
 
 views\agent\sales_screen.dart:
@@ -4659,13 +4802,14 @@ class _PaymentSectionState extends State<PaymentSection> {
 widgets\product_details_card.dart:
 
 # widgets\product_details_card.dart
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../models/product.dart';
 import '../models/discount.dart';
 import 'discount_badge.dart';
 import '../viewmodels/discount_vm.dart';
 import '../viewmodels/sales_vm.dart';
-import 'package:provider/provider.dart';
 
 class ProductDetailsCard extends StatefulWidget {
   final Product product;
@@ -4691,7 +4835,7 @@ class _ProductDetailsCardState extends State<ProductDetailsCard> {
 
     // Get applicable discounts for this product's category
     final applicableDiscounts = discountVM.activeDiscounts
-        .where((d) => d.categoryRef == widget.product.categoryRef)
+        .where((d) => d.categoryRef.path == widget.product.categoryRef.path)
         .toList();
 
     // Get the initially selected discount (if any)
@@ -4749,11 +4893,33 @@ class _ProductDetailsCardState extends State<ProductDetailsCard> {
                         overflow: TextOverflow.ellipsis,
                       ),
                       const SizedBox(height: 4),
-                      Text(
-                        widget.product.categoryRef,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: Colors.grey[600],
-                        ),
+                      FutureBuilder<DocumentSnapshot>(
+                        future: widget.product.categoryRef.get(),
+                        builder: (context, snapshot) {
+                          if (snapshot.connectionState == ConnectionState.waiting) {
+                            return Text(
+                              'Loading category...',
+                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                color: Colors.grey[600],
+                              ),
+                            );
+                          }
+                          if (snapshot.hasError) {
+                            return Text(
+                              'Category: Error',
+                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                color: Colors.grey[600],
+                              ),
+                            );
+                          }
+                          final categoryName = snapshot.data?.get('name') ?? 'Uncategorized';
+                          return Text(
+                            'Category: $categoryName',
+                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: Colors.grey[600],
+                            ),
+                          );
+                        },
                       ),
                       if (widget.product.barcode.isNotEmpty)
                         Text(
