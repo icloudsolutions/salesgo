@@ -727,20 +727,28 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
                             '${discount.value}${discount.type} discount',
                             style: const TextStyle(fontWeight: FontWeight.bold),
                           ),
-                          Text(
-                            'Valid: ${DateFormat('MMM dd').format(discount.startDate)} - '
-                            '${DateFormat('MMM dd, yyyy').format(discount.endDate)}',
-                          ),
-                          if (discount.isActive)
-                            Chip(
-                              label: const Text('Active'),
-                              backgroundColor: Colors.green[100],
-                            )
-                          else
-                            Chip(
-                              label: const Text('Expired'),
-                              backgroundColor: Colors.red[100],
+                          const SizedBox(height: 4),
+                          if (discount.hasDateRange && discount.startDate != null && discount.endDate != null) ...[
+                            Text(
+                              'Valid: ${DateFormat('MMM dd, yyyy').format(discount.startDate!)} - '
+                              '${DateFormat('MMM dd, yyyy').format(discount.endDate!)}',
                             ),
+                            const SizedBox(height: 4),
+                            discount.isActive
+                                ? Chip(
+                                    label: const Text('Active'),
+                                    backgroundColor: Colors.green[100],
+                                  )
+                                : Chip(
+                                    label: const Text('Expired'),
+                                    backgroundColor: Colors.red[100],
+                                  ),
+                          ] else ...[
+                            Chip(
+                              label: const Text('Always Active'),
+                              backgroundColor: Colors.blue[100],
+                            ),
+                          ],
                         ],
                       ),
                       trailing: Row(

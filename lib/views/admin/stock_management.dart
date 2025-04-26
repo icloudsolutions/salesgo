@@ -434,22 +434,43 @@ class _StockManagementState extends State<StockManagement> {
       final authVM = Provider.of<AuthViewModel>(context, listen: false);
 
       try {
-        // Update stock
-        await FirebaseFirestore.instance
-            .collection('locations/$_selectedLocationId/stock')
-            .doc(productId)
-            .set({'quantity': quantity});
-
-        // Record history if admin
-        if (authVM.userRole == 'admin') {
-          await FirebaseFirestore.instance.collection('stockHistory').add({
-            'locationId': _selectedLocationId,
-            'productId': productId,
-            'quantity': quantity,
-            'timestamp': DateTime.now(),
-            'adminId': authVM.currentUser?.uid,
-          });
+        // Verify admin role before proceeding
+        if (authVM.userRole != 'admin') {
+          throw Exception('Only administrators can assign stock');
         }
+
+        // Use batch write for atomic operations
+        final batch = FirebaseFirestore.instance.batch();
+
+        // 1. Update stock quantity
+        final stockRef = FirebaseFirestore.instance
+            .collection('locations')
+            .doc(_selectedLocationId)
+            .collection('stock')
+            .doc(productId);
+        batch.set(stockRef, {
+          'quantity': quantity,
+          'lastUpdated': FieldValue.serverTimestamp(),
+          'updatedBy': authVM.currentUser?.uid,
+        });
+
+        // 2. Add to stock history
+        final historyRef = FirebaseFirestore.instance
+            .collection('stockHistory')
+            .doc();
+        batch.set(historyRef, {
+          'locationId': _selectedLocationId,
+          'productId': productId,
+          'productName': _selectedProduct!['name'], // Added product name for better tracking
+          'previousQuantity': FieldValue.increment(0), // Placeholder if you want to track changes
+          'quantity': quantity,
+          'timestamp': FieldValue.serverTimestamp(),
+          'adminId': authVM.currentUser?.uid,
+          'adminName': authVM.currentUser?.name ?? 'Admin',
+        });
+
+        // Execute both operations atomically
+        await batch.commit();
 
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Stock updated successfully')),
@@ -459,12 +480,16 @@ class _StockManagementState extends State<StockManagement> {
         _productController.clear();
         _quantityController.clear();
         setState(() => _selectedProduct = null);
-        FocusScope.of(context).requestFocus(FocusNode());
+        FocusScope.of(context).unfocus();
       } catch (e) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error updating stock: ${e.toString()}')),
+          SnackBar(
+            content: Text('Error updating stock: ${e.toString()}'),
+            duration: const Duration(seconds: 5),
+          ),
         );
       }
     }
   }
+
 }

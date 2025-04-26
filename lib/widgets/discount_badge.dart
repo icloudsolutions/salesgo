@@ -21,8 +21,8 @@ class DiscountBadge extends StatelessWidget {
             ),
           ),
           Text(
-            'Valide: ${discount.startDate.day}/${discount.startDate.month} '
-            '- ${discount.endDate.day}/${discount.endDate.month}',
+            'Valide: ${discount.startDate?.day}/${discount.startDate?.month} '
+            '- ${discount.endDate?.day}/${discount.endDate?.month}',
             style: const TextStyle(fontSize: 10),
           ),
         ],
