@@ -327,11 +327,18 @@ Widget _buildGroupedByCategory(List<Sale> sales) {
             ? FirebaseFirestore.instance.doc(data.categoryId).get()
             : FirebaseFirestore.instance.collection('categories').doc(data.categoryId).get(),
         builder: (context, snapshot) {
-          // Get category name or fallback
-          final categoryName = snapshot.hasData 
-              ? snapshot.data!.get('name') ?? 'Uncategorized'
-              : 'Loading...';
-          
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const ListTile(
+              leading: Icon(Icons.category),
+              title: Text('Loading...'),
+            );
+          }
+
+          String categoryName = 'Uncategorized';
+          if (snapshot.hasData && snapshot.data!.exists) {
+            categoryName = snapshot.data!.get('name') ?? 'Uncategorized';
+          }
+
           return ExpansionTile(
             leading: const Icon(Icons.category),
             title: Text(categoryName),
@@ -353,7 +360,7 @@ Widget _buildGroupedByCategory(List<Sale> sales) {
                       future: _getTopProductsInCategory(sales, data.categoryId),
                       builder: (context, productSnapshot) {
                         if (!productSnapshot.hasData) {
-                          return const CircularProgressIndicator();
+                          return const Center(child: CircularProgressIndicator());
                         }
                         return Column(
                           children: productSnapshot.data!.take(3).map((product) {
@@ -418,6 +425,7 @@ Widget _buildGroupedByCategory(List<Sale> sales) {
       );
     }).toList(),
   );
+
 }
 
 Future<List<Product>> _getTopProductsInCategory(List<Sale> sales, String categoryId) async {
