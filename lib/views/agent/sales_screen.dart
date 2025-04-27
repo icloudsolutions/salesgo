@@ -175,6 +175,7 @@ class _SalesScreenState extends State<SalesScreen> {
         paymentMethod: paymentMethod,
         couponCode: couponCode,
         agentId: authVM.currentUser!.uid,
+        locationId: authVM.currentUser!.assignedLocationId!, 
       );
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -185,7 +186,7 @@ class _SalesScreenState extends State<SalesScreen> {
       setState(() {
         _isScanning = true;
         _isProcessingPayment = false;
-        _hasScanned = false; // Reset scan state for new sale
+        _hasScanned = false;
       });
       _scannerController.start();
       
@@ -199,4 +200,5 @@ class _SalesScreenState extends State<SalesScreen> {
       }
     }
   }
+
 }

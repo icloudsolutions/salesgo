@@ -1,1 +1,29 @@
-{"flutter":{"platforms":{"android":{"default":{"projectId":"salesgo-49e56","appId":"1:841065984080:android:e356f68a50456f32836155","fileOutput":"android/app/google-services.json"}},"dart":{"lib/firebase_options.dart":{"projectId":"salesgo-49e56","configurations":{"android":"1:841065984080:android:e356f68a50456f32836155","ios":"1:841065984080:ios:2b7a1fa1b210daba836155","macos":"1:841065984080:ios:2b7a1fa1b210daba836155","web":"1:841065984080:web:74416838864f3d38836155","windows":"1:841065984080:web:d629584b20a21e2c836155"}}}}}}
+{
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "salesgo-49e56",
+          "appId": "1:841065984080:android:e356f68a50456f32836155",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "salesgo-49e56",
+          "configurations": {
+            "android": "1:841065984080:android:e356f68a50456f32836155",
+            "ios": "1:841065984080:ios:2b7a1fa1b210daba836155",
+            "macos": "1:841065984080:ios:2b7a1fa1b210daba836155",
+            "web": "1:841065984080:web:74416838864f3d38836155",
+            "windows": "1:841065984080:web:d629584b20a21e2c836155"
+          }
+        }
+      }
+    }
+  },
+  "firestore": {
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
+  }
+}

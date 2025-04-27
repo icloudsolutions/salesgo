@@ -61,13 +61,19 @@ class FirestoreService {
 
             for (final product in products) {
               final productId = product['id'] as String;
-              final quantity = product['quantity'] as int;
+
+              //  Check if 'quantity' exists, else default to 1
+              final quantity = (product['quantity'] != null) 
+                  ? product['quantity'] as int 
+                  : 1;
+
               monthlySales[productId] = (monthlySales[productId] ?? 0) + quantity;
             }
           }
           return monthlySales;
         });
   }
+
 
 
 
