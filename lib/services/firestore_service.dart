@@ -130,7 +130,41 @@ class FirestoreService {
     }
   }
 
+  Future<void> processRefund({
+    required List<Product> products,
+    required String agentId,
+    required String locationId,
+  }) async {
+    try {
+      final batch = FirebaseFirestore.instance.batch();
+      final refundDoc = FirebaseFirestore.instance.collection('refunds').doc();
+      
+      // Create refund record
+      batch.set(refundDoc, {
+        'products': products.map((p) => p.toMap()).toList(),
+        'totalAmount': products.fold(0.0, (sum, p) => sum + p.price),
+        'agentId': agentId,
+        'locationId': locationId,
+        'date': FieldValue.serverTimestamp(),
+        'status': 'completed',
+      });
 
+      // Update inventory for each product
+      for (final product in products) {
+        final productRef = FirebaseFirestore.instance
+            .collection('products')
+            .doc(product.id);
+        
+        batch.update(productRef, {
+          'stock': FieldValue.increment(1),
+        });
+      }
+
+      await batch.commit();
+    } catch (e) {
+      throw Exception('Failed to process refund: $e');
+    }
+  }
 
   // Categories
   Future<void> addCategory(Map<String, dynamic> categoryData) async {

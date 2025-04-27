@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:salesgo/firebase_options.dart';
 import 'package:salesgo/viewmodels/discount_vm.dart';
+import 'package:salesgo/viewmodels/refund_vm.dart';
 import 'package:salesgo/viewmodels/sales_vm.dart';
 import 'package:salesgo/viewmodels/stock_vm.dart';
 import 'package:salesgo/views/admin/admin_home_screen.dart';
@@ -42,6 +43,9 @@ void main() async {
         ChangeNotifierProvider(create: (context) => DiscountViewModel(
           firestoreService: context.read<FirestoreService>(),
         )),
+        ChangeNotifierProvider(create: (context) => RefundViewModel(
+          firestoreService: context.read<FirestoreService>(),
+        )),        
       ],
       child: const MyApp(),
     ),
