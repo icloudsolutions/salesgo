@@ -387,9 +387,11 @@ class _StockManagementState extends State<StockManagement> {
                                             ],
                                           ),
                                           trailing: Text(
-                                            DateFormat('dd/MM/yy HH:mm').format(
-                                              (data['timestamp'] as Timestamp).toDate(),
-                                            ),
+                                            data['timestamp'] != null 
+                                                ? DateFormat('dd/MM/yy HH:mm').format(
+                                                    (data['timestamp'] as Timestamp).toDate(),
+                                                  )
+                                                : 'No date', // Fallback for null timestamp
                                           ),
                                         ),
                                       );

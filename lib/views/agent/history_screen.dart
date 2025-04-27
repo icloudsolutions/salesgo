@@ -4,7 +4,6 @@ import 'package:provider/provider.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:salesgo/models/product.dart';
 import 'package:salesgo/models/sale.dart';
-import 'package:salesgo/models/discount.dart';
 import '../../viewmodels/auth_vm.dart';
 import '../../widgets/sale_item.dart';
 

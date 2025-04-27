@@ -45,19 +45,31 @@ class FirestoreService {
     return FirebaseFirestore.instance
         .collection('sales')
         .where('locationId', isEqualTo: locationId)
-        .where('timestamp', isGreaterThanOrEqualTo: firstDayOfMonth)
+        .where('date', isGreaterThanOrEqualTo: Timestamp.fromDate(firstDayOfMonth))
         .snapshots()
         .map((snapshot) {
+          debugPrint('Fetched sales count: ${snapshot.docs.length}');
+          
+          for (final doc in snapshot.docs) {
+            debugPrint('Fetched sale: ${doc.data()}');
+          }
+
           final monthlySales = <String, int>{};
           for (final doc in snapshot.docs) {
             final sale = doc.data() as Map<String, dynamic>;
-            final productId = sale['productId'] as String;
-            final quantity = sale['quantity'] as int;
-            monthlySales[productId] = (monthlySales[productId] ?? 0) + quantity;
+            final List<dynamic> products = sale['products'] ?? [];
+
+            for (final product in products) {
+              final productId = product['id'] as String;
+              final quantity = product['quantity'] as int;
+              monthlySales[productId] = (monthlySales[productId] ?? 0) + quantity;
+            }
           }
           return monthlySales;
         });
-  }  
+  }
+
+
 
   // Stocks
   Stream<Map<String, int>> getLocationStock(String locationId) {

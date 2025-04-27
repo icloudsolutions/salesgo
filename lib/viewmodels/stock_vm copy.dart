@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import '../services/firestore_service.dart';
 
@@ -8,6 +7,7 @@ class StockViewModel with ChangeNotifier {
   Map<String, int> _stock = {};
   Map<String, int> _monthlySales = {};
   bool _isLoading = false;
+  StreamSubscription<Map<String, int>>? _stockSubscription;
   StreamSubscription<Map<String, int>>? _salesSubscription;
 
   StockViewModel({required FirestoreService firestoreService})
@@ -25,46 +25,33 @@ class StockViewModel with ChangeNotifier {
     return adjusted;
   }
 
-  Future<void> loadStock(String locationId) async {
+  void loadStock(String locationId) {
+    _stockSubscription?.cancel();
     _salesSubscription?.cancel();
-
+    
     _isLoading = true;
     notifyListeners();
-
-    try {
-      // 🔥 Load assigned stock from stockHistory
-      final assignedStock = await _loadAssignedStockFromHistory(locationId);
-      _stock = assignedStock;
-
-      _loadMonthlySales(locationId);
-    } catch (error) {
-      _isLoading = false;
-      notifyListeners();
-      debugPrint('Error loading stock: $error');
-    }
-  }
-
-  Future<Map<String, int>> _loadAssignedStockFromHistory(String locationId) async {
-    final snapshot = await FirebaseFirestore.instance
-        .collection('stockHistory')
-        .where('locationId', isEqualTo: locationId)
-        .get();
-
-    final Map<String, int> assignedStock = {};
-    for (final doc in snapshot.docs) {
-      final data = doc.data();
-      final productId = data['productId'] as String;
-      final quantity = data['quantity'] as int;
-
-      assignedStock[productId] = (assignedStock[productId] ?? 0) + quantity;
-    }
-    return assignedStock;
+    
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      // Load current stock
+      _stockSubscription = _firestoreService.getLocationStock(locationId).listen(
+        (stockData) {
+          _stock = stockData;
+          _loadMonthlySales(locationId);
+        },
+        onError: (error) {
+          _isLoading = false;
+          notifyListeners();
+          debugPrint('Error loading stock: $error');
+        },
+      );
+    });
   }
 
   void _loadMonthlySales(String locationId) {
     final now = DateTime.now();
     final firstDayOfMonth = DateTime(now.year, now.month, 1);
-
+    
     _salesSubscription = _firestoreService
         .getMonthlySales(locationId, firstDayOfMonth)
         .listen((salesData) {
@@ -80,6 +67,7 @@ class StockViewModel with ChangeNotifier {
 
   @override
   void dispose() {
+    _stockSubscription?.cancel();
     _salesSubscription?.cancel();
     super.dispose();
   }
