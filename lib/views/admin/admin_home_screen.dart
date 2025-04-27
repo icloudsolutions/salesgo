@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:salesgo/views/admin/car_management.dart';
+import 'package:salesgo/views/admin/location_management.dart';
 import 'package:salesgo/views/admin/product_management.dart';
-import 'users_screen.dart';
+import 'users_management.dart';
 import 'stock_management.dart';
 import 'reports_screen.dart';
 import '../../viewmodels/auth_vm.dart';
@@ -20,7 +20,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
   static const List<Widget> _adminScreens = [
     UsersScreen(),
     ProductManagement(),
-    CarManagement(),
+    LocationManagement(),
     StockManagement(),
     ReportsScreen(),
   ];
@@ -39,7 +39,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Tableau de bord Admin'),
+        title: const Text('Admin Dashboard'),
         actions: [
           IconButton(
             icon: const Icon(Icons.logout),
@@ -59,14 +59,14 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.shopping_bag),
-            label: 'Produits',
+            label: 'Products',
           ),
           BottomNavigationBarItem(
-            icon: Icon(Icons.directions_car),
-            label: 'Véhicules',
+            icon: Icon(Icons.map),
+            label: 'Locations',
           ),
           BottomNavigationBarItem(
-            icon: Icon(Icons.inventory),
+            icon: Icon(Icons.warehouse_outlined),
             label: 'Stock',
           ),
           BottomNavigationBarItem(

@@ -1,38 +1,54 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:salesgo/models/car.dart';
+import 'package:salesgo/models/location.dart';
 import 'package:salesgo/models/user.dart';
 
-class CarManagement extends StatefulWidget {
-  const CarManagement({super.key});
+class LocationManagement extends StatefulWidget {
+  const LocationManagement({super.key});
 
   @override
-  _CarManagementState createState() => _CarManagementState();
+  _LocationManagementState createState() => _LocationManagementState();
 }
 
-class _CarManagementState extends State<CarManagement> {
+class _LocationManagementState extends State<LocationManagement> {
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
-  final _plateController = TextEditingController();
+  String _selectedType = 'van';
   String? _selectedAgentId;
 
-  Future<void> _addCar() async {
+  Future<void> _addLocation() async {
     if (_formKey.currentState!.validate()) {
       try {
-        final car = Car(
-          id: FirebaseFirestore.instance.collection('cars').doc().id,
+        final location = Location(
+          id: FirebaseFirestore.instance.collection('locations').doc().id,
           name: _nameController.text,
-          plateNumber: _plateController.text,
+          type: _selectedType,
           assignedAgentId: _selectedAgentId,
+          createdAt: DateTime.now(),
         );
 
-        await FirebaseFirestore.instance
-            .collection('cars')
-            .doc(car.id)
-            .set(car.toMap());
+        // Create a batch to update both documents atomically
+        final batch = FirebaseFirestore.instance.batch();
+        
+        // 1. Set the location document
+        final locationRef = FirebaseFirestore.instance
+            .collection('locations')
+            .doc(location.id);
+        batch.set(locationRef, location.toMap());
+        
+        // 2. If an agent is assigned, update the user document
+        if (_selectedAgentId != null) {
+          final userRef = FirebaseFirestore.instance
+              .collection('users')
+              .doc(_selectedAgentId);
+          batch.update(userRef, {'assignedLocationId': location.id});
+        }
+
+        // Commit both operations together
+        await batch.commit();
 
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Car added successfully')),
+          const SnackBar(content: Text('Location added successfully')),
         );
 
         // Clear form
@@ -40,16 +56,17 @@ class _CarManagementState extends State<CarManagement> {
         setState(() => _selectedAgentId = null);
       } catch (e) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error adding car: $e')),
+          SnackBar(content: Text('Error adding location: $e')),
         );
       }
     }
+  
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Car Management')),
+      appBar: AppBar(title: const Text('Location Management')),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Form(
@@ -58,13 +75,19 @@ class _CarManagementState extends State<CarManagement> {
             children: [
               TextFormField(
                 controller: _nameController,
-                decoration: const InputDecoration(labelText: 'Car Name'),
+                decoration: const InputDecoration(labelText: 'Location Name'),
                 validator: (value) => value!.isEmpty ? 'Required' : null,
               ),
-              TextFormField(
-                controller: _plateController,
-                decoration: const InputDecoration(labelText: 'Plate Number'),
-                validator: (value) => value!.isEmpty ? 'Required' : null,
+              const SizedBox(height: 20),
+              DropdownButtonFormField<String>(
+                value: _selectedType,
+                items: const [
+                  DropdownMenuItem(value: 'warehouse', child: Text('Warehouse')),
+                  DropdownMenuItem(value: 'store', child: Text('Store')),
+                  DropdownMenuItem(value: 'van', child: Text('Mobile Van')),
+                ],
+                onChanged: (value) => setState(() => _selectedType = value!),
+                decoration: const InputDecoration(labelText: 'Location Type'),
               ),
               const SizedBox(height: 20),
               const Text('Assign to Agent (optional)'),
@@ -96,15 +119,15 @@ class _CarManagementState extends State<CarManagement> {
               ),
               const SizedBox(height: 20),
               ElevatedButton(
-                onPressed: _addCar,
-                child: const Text('Add Car'),
+                onPressed: _addLocation,
+                child: const Text('Add Location'),
               ),
               const SizedBox(height: 20),
               const Divider(),
-              const Text('Existing Cars', style: TextStyle(fontSize: 18)),
+              const Text('Existing Locations', style: TextStyle(fontSize: 18)),
               const SizedBox(height: 10),
               StreamBuilder<QuerySnapshot>(
-                stream: FirebaseFirestore.instance.collection('cars').snapshots(),
+                stream: FirebaseFirestore.instance.collection('locations').snapshots(),
                 builder: (context, snapshot) {
                   if (!snapshot.hasData) {
                     return const CircularProgressIndicator();
@@ -115,13 +138,13 @@ class _CarManagementState extends State<CarManagement> {
                     itemCount: snapshot.data!.docs.length,
                     itemBuilder: (context, index) {
                       final doc = snapshot.data!.docs[index];
-                      final car = Car.fromFirestore(doc.data() as Map<String, dynamic>);
+                      final location = Location.fromFirestore(doc.data() as Map<String, dynamic>);
                       return ListTile(
-                        title: Text(car.name),
-                        subtitle: Text('Plate: ${car.plateNumber}'),
+                        title: Text(location.name),
+                        subtitle: Text('Type: ${location.type}'),
                         trailing: IconButton(
                           icon: const Icon(Icons.delete),
-                          onPressed: () => _deleteCar(doc.id),
+                          onPressed: () => _deleteLocation(doc.id),
                         ),
                       );
                     },
@@ -135,15 +158,15 @@ class _CarManagementState extends State<CarManagement> {
     );
   }
 
-  Future<void> _deleteCar(String carId) async {
+  Future<void> _deleteLocation(String locationId) async {
     try {
-      await FirebaseFirestore.instance.collection('cars').doc(carId).delete();
+      await FirebaseFirestore.instance.collection('locations').doc(locationId).delete();
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Car deleted')),
+        const SnackBar(content: Text('Location deleted')),
       );
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error deleting car: $e')),
+        SnackBar(content: Text('Error deleting location: $e')),
       );
     }
   }
@@ -151,7 +174,6 @@ class _CarManagementState extends State<CarManagement> {
   @override
   void dispose() {
     _nameController.dispose();
-    _plateController.dispose();
     super.dispose();
   }
 }

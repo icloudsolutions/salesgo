@@ -1,11 +1,13 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../models/product.dart';
 import '../models/discount.dart';
 import 'discount_badge.dart';
 import '../viewmodels/discount_vm.dart';
-import 'package:provider/provider.dart';
+import '../viewmodels/sales_vm.dart';
 
-class ProductDetailsCard extends StatelessWidget {
+class ProductDetailsCard extends StatefulWidget {
   final Product product;
   final VoidCallback? onRemove;
 
@@ -15,28 +17,30 @@ class ProductDetailsCard extends StatelessWidget {
     this.onRemove,
   });
 
-  double _calculateFinalPrice(double basePrice, List<Discount> discounts) {
-    if (discounts.isEmpty) return basePrice;
-    
-    // Get the highest applicable discount
-    final applicableDiscounts = discounts.where((d) => d.category == product.category).toList();
-    if (applicableDiscounts.isEmpty) return basePrice;
+  @override
+  State<ProductDetailsCard> createState() => _ProductDetailsCardState();
+}
 
-    final maxDiscount = applicableDiscounts
-      .map((d) => d.type == '%' ? basePrice * (d.value / 100) : d.value)
-      .reduce((a, b) => a > b ? a : b);
-
-    return basePrice - maxDiscount;
-  }
+class _ProductDetailsCardState extends State<ProductDetailsCard> {
+  Discount? _selectedDiscount;
 
   @override
   Widget build(BuildContext context) {
     final discountVM = Provider.of<DiscountViewModel>(context);
+    final salesVM = Provider.of<SalesViewModel>(context);
 
-    final finalPrice = _calculateFinalPrice(
-      product.price,
-      discountVM.activeDiscounts,
-    );
+    // Get applicable discounts for this product's category
+    final applicableDiscounts = discountVM.activeDiscounts
+        .where((d) => d.categoryRef.path == widget.product.categoryRef.path)
+        .toList();
+
+    // Get the initially selected discount (if any)
+    _selectedDiscount ??= salesVM.getSelectedDiscountForProduct(widget.product.id);
+
+    // Calculate final price based on selected discount
+    final finalPrice = _selectedDiscount != null
+        ? _calculatePriceWithDiscount(widget.product.price, _selectedDiscount!)
+        : widget.product.price;
 
     return Card(
       margin: const EdgeInsets.all(12),
@@ -45,57 +49,153 @@ class ProductDetailsCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // Product header row with image and name
             Row(
               children: [
                 // Product Image
-                if (product.imageUrl != null)
-                  Image.network(
-                    product.imageUrl!,
-                    width: 80,
-                    height: 80,
-                    fit: BoxFit.cover,
+                if (widget.product.imageUrl != null)
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: Image.network(
+                      widget.product.imageUrl!,
+                      width: 80,
+                      height: 80,
+                      fit: BoxFit.cover,
+                    ),
                   ),
-                if (product.imageUrl == null || product.imageUrl!.isEmpty)
+                if (widget.product.imageUrl == null || widget.product.imageUrl!.isEmpty)
                   Container(
                     width: 80,
                     height: 80,
-                    color: Colors.grey[200],
+                    decoration: BoxDecoration(
+                      color: Colors.grey[200],
+                      borderRadius: BorderRadius.circular(8),
+                    ),
                     child: const Icon(Icons.image_not_supported, color: Colors.grey),
                   ),
                 const SizedBox(width: 16),
+                
                 // Product Info
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        product.name,
-                        style: Theme.of(context).textTheme.titleLarge,
+                        widget.product.name,
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
                       ),
                       const SizedBox(height: 4),
-                      Text(
-                        product.category,
-                        style: Theme.of(context).textTheme.bodySmall,
+                      FutureBuilder<DocumentSnapshot>(
+                        future: widget.product.categoryRef.get(),
+                        builder: (context, snapshot) {
+                          if (snapshot.connectionState == ConnectionState.waiting) {
+                            return Text(
+                              'Loading category...',
+                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                color: Colors.grey[600],
+                              ),
+                            );
+                          }
+                          if (snapshot.hasError) {
+                            return Text(
+                              'Category: Error',
+                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                color: Colors.grey[600],
+                              ),
+                            );
+                          }
+                          final categoryName = snapshot.data?.get('name') ?? 'Uncategorized';
+                          return Text(
+                            'Category: $categoryName',
+                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: Colors.grey[600],
+                            ),
+                          );
+                        },
                       ),
+                      if (widget.product.barcode.isNotEmpty)
+                        Text(
+                          'Barcode: ${widget.product.barcode}',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
                     ],
                   ),
                 ),
+                
                 // Remove Button (only shown if onRemove callback is provided)
-                if (onRemove != null)
+                if (widget.onRemove != null)
                   IconButton(
                     icon: const Icon(Icons.delete, color: Colors.red),
-                    onPressed: onRemove,
+                    onPressed: widget.onRemove,
                   ),
               ],
             ),
-            const Divider(),
+            
+            const Divider(height: 24, thickness: 1),
+            
+            // Discount Selection
+            if (applicableDiscounts.isNotEmpty) ...[
+              Text(
+                'Available Discounts:',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                decoration: BoxDecoration(
+                  border: Border.all(color: Colors.grey[300]!),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: DropdownButton<Discount>(
+                  isExpanded: true,
+                  value: _selectedDiscount,
+                  hint: const Text('Select discount...'),
+                  underline: const SizedBox(), // Remove default underline
+                  items: [
+                    const DropdownMenuItem<Discount>(
+                      value: null,
+                      child: Text('No discount'),
+                    ),
+                    ...applicableDiscounts.map((discount) {
+                      return DropdownMenuItem<Discount>(
+                        value: discount,
+                        child: Text(
+                          '${discount.value}${discount.type} discount',
+                          style: TextStyle(
+                            color: _selectedDiscount == discount 
+                                ? Theme.of(context).primaryColor 
+                                : null,
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ],
+                  onChanged: (Discount? selected) {
+                    setState(() {
+                      _selectedDiscount = selected;
+                    });
+                    salesVM.selectDiscountForProduct(widget.product.id, selected);
+                  },
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
+            
             // Price Information
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(
                   'Final Price:',
-                  style: Theme.of(context).textTheme.bodyLarge,
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
                 Text(
                   '€${finalPrice.toStringAsFixed(2)}',
@@ -107,11 +207,13 @@ class ProductDetailsCard extends StatelessWidget {
                 ),
               ],
             ),
-            if (finalPrice < product.price)
+            
+            // Original price if discounted
+            if (_selectedDiscount != null)
               Padding(
-                padding: const EdgeInsets.only(top: 8),
+                padding: const EdgeInsets.only(top: 4),
                 child: Text(
-                  'Original Price: €${product.price.toStringAsFixed(2)}',
+                  'Original: €${widget.product.price.toStringAsFixed(2)}',
                   style: TextStyle(
                     fontSize: 14,
                     color: Colors.grey[600],
@@ -119,18 +221,21 @@ class ProductDetailsCard extends StatelessWidget {
                   ),
                 ),
               ),
-            const SizedBox(height: 12),
-            // Discount Badges
-            Wrap(
-              spacing: 8,
-              children: discountVM.activeDiscounts
-                  .where((d) => d.category == product.category)
-                  .map((discount) => DiscountBadge(discount: discount))
-                  .toList(),
-            ),
+            
+            // Discount details if applied
+            if (_selectedDiscount != null) ...[
+              const SizedBox(height: 12),
+              DiscountBadge(discount: _selectedDiscount!),
+            ],
           ],
         ),
       ),
     );
+  }
+
+  double _calculatePriceWithDiscount(double basePrice, Discount discount) {
+    return discount.type == '%' 
+        ? basePrice * (1 - discount.value / 100)
+        : basePrice - discount.value;
   }
 }

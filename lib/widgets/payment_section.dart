@@ -121,7 +121,7 @@ class _PaymentSectionState extends State<PaymentSection> {
                           )
                         : const Text(
                             'Confirm Sale',
-                            style: TextStyle(fontSize: 16),
+                            style: TextStyle(fontSize: 16, color: Colors.white),
                           ),
                   ),
                 ],

@@ -3,9 +3,10 @@ lib/
 ├── firebase_options.dart
 ├── main.dart
 ├── models/
-│   ├── car.dart
+│   ├── category.dart
 │   ├── coupon.dart
 │   ├── discount.dart
+│   ├── location.dart
 │   ├── product.dart
 │   ├── sale.dart
 │   └── user.dart
@@ -23,15 +24,16 @@ lib/
 ├── views/
 │   ├── admin/
 │   │   ├── admin_home_screen.dart
-│   │   ├── car_management.dart
+│   │   ├── location_management.dart
 │   │   ├── product_management.dart
 │   │   ├── reports_screen.dart
 │   │   ├── stock_management.dart
-│   │   └── users_screen.dart
+│   │   └── users_management.dart
 │   ├── agent/
 │   │   ├── agent_home_screen.dart
 │   │   ├── history_screen.dart
 │   │   ├── sales_screen.dart
+│   │   ├── stock_screen copy.dart
 │   │   └── stock_screen.dart
 │   ├── login_screen.dart
 │   └── signup_screen.dart
@@ -47,7 +49,7 @@ app.dart:
 # app.dart
 import 'package:flutter/material.dart';
 import 'package:salesgo/views/admin/admin_home_screen.dart';
-import 'package:salesgo/views/admin/users_screen.dart';
+import 'package:salesgo/views/admin/users_management.dart';
 import 'package:salesgo/views/agent/agent_home_screen.dart';
 import 'package:salesgo/views/agent/history_screen.dart';
 import 'package:salesgo/views/agent/stock_screen.dart';
@@ -60,7 +62,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Ventes Porte-à-Porte',
+      title: 'Mobile SalesGo',
       theme: ThemeData(primarySwatch: Colors.blue),
       initialRoute: '/',
       routes: {
@@ -180,7 +182,7 @@ import 'package:salesgo/viewmodels/discount_vm.dart';
 import 'package:salesgo/viewmodels/sales_vm.dart';
 import 'package:salesgo/viewmodels/stock_vm.dart';
 import 'package:salesgo/views/admin/admin_home_screen.dart';
-import 'package:salesgo/views/admin/users_screen.dart';
+import 'package:salesgo/views/admin/users_management.dart';
 import 'package:salesgo/views/agent/agent_home_screen.dart';
 import 'package:salesgo/views/agent/history_screen.dart';
 import 'package:salesgo/views/agent/stock_screen.dart';
@@ -267,7 +269,7 @@ import 'views/admin/admin_home_screen.dart';
 import 'views/agent/agent_home_screen.dart';
 import 'views/agent/history_screen.dart';
 import 'views/agent/stock_screen.dart';
-import 'views/admin/users_screen.dart';
+import 'views/admin/users_management.dart';
 
 final appRoutes = {
   '/history': (context) => const HistoryScreen(),
@@ -279,36 +281,38 @@ final appRoutes = {
 
 };
 
-models\car.dart:
+models\category.dart:
 
-# models\car.dart
-class Car {
+# models\category.dart
+import 'package:cloud_firestore/cloud_firestore.dart';
+
+class Category {
   final String id;
   final String name;
-  final String plateNumber;
-  final String? assignedAgentId;
+  final DocumentReference? reference; // Add reference field
+  final DateTime createdAt;
 
-  Car({
+  Category({
     required this.id,
     required this.name,
-    required this.plateNumber,
-    this.assignedAgentId,
+    this.reference,
+    required this.createdAt,
   });
 
-  factory Car.fromFirestore(Map<String, dynamic> data) {
-    return Car(
-      id: data['id'],
-      name: data['name'],
-      plateNumber: data['plateNumber'],
-      assignedAgentId: data['assignedAgentId'],
+  factory Category.fromFirestore(DocumentSnapshot doc) {
+    final data = doc.data() as Map<String, dynamic>;
+    return Category(
+      id: doc.id,
+      name: data['name'] ?? '',
+      reference: doc.reference,
+      createdAt: (data['createdAt'] as Timestamp).toDate(),
     );
   }
 
   Map<String, dynamic> toMap() => {
-    'id': id,
     'name': name,
-    'plateNumber': plateNumber,
-    'assignedAgentId': assignedAgentId,
+    //'imageUrl': imageUrl,
+    'createdAt': FieldValue.serverTimestamp(),
   };
 }
 
@@ -348,39 +352,110 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 
 class Discount {
   final String id;
-  final String category;
+  final DocumentReference categoryRef;
   final DateTime startDate;
   final DateTime endDate;
   final double value;
   final String type;
+  final String name;
+  final DocumentReference? reference;
 
   Discount({
     required this.id,
-    required this.category,
+    required this.categoryRef,
     required this.startDate,
     required this.endDate,
     required this.value,
     required this.type,
+    required this.name,
+    this.reference,
   });
 
-  factory Discount.fromFirestore(Map<String, dynamic> data) {
-    return Discount(
-      id: data['id'] as String? ?? '', // Provide empty string as default
-      category: data['category'] as String? ?? 'general', // Default category
-      startDate: (data['startDate'] as Timestamp?)?.toDate() ?? DateTime.now(),
-      endDate: (data['endDate'] as Timestamp?)?.toDate() ?? DateTime.now().add(const Duration(days: 30)),
-      value: (data['value'] as num?)?.toDouble() ?? 0.0,
-      type: data['type'] as String? ?? 'percentage', // Default to percentage
+  /// Creates a Discount from a Firestore DocumentSnapshot
+  factory Discount.fromFirestore(DocumentSnapshot doc) {
+    try {
+      final data = doc.data() as Map<String, dynamic>;
+      
+      return Discount(
+        id: doc.id,
+        categoryRef: data['categoryRef'] as DocumentReference,
+        startDate: (data['startDate'] as Timestamp).toDate(),
+        endDate: (data['endDate'] as Timestamp).toDate(),
+        value: (data['value'] as num).toDouble(),
+        type: data['type'] as String,
+        name: data['name'] as String? ?? '',
+        reference: doc.reference,
+      );
+    } catch (e) {
+      throw FormatException('Failed to parse Discount: $e');
+    }
+  }
+
+
+
+  /// Converts the Discount to a Map for Firestore
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'categoryRef': categoryRef,
+      'startDate': Timestamp.fromDate(startDate),
+      'endDate': Timestamp.fromDate(endDate),
+      'value': value,
+      'type': type,
+      if (name.isNotEmpty) 'name': name,
+    };
+  }
+
+  /// Helper method to check if discount is currently active
+  bool get isActive {
+    final now = DateTime.now();
+    return now.isAfter(startDate) && now.isBefore(endDate);
+  }
+
+  @override
+  String toString() {
+    return 'Discount(id: $id, name: $name, value: $value$type, '
+           'active: ${startDate.toIso8601String()} to ${endDate.toIso8601String()})';
+  }
+}
+
+models\location.dart:
+
+# models\location.dart
+import 'package:cloud_firestore/cloud_firestore.dart';
+
+class Location {
+  final String id;
+  final String name;
+  final String type; // Added location type
+  final String? assignedAgentId;
+  final DateTime createdAt;
+
+  Location({
+    required this.id,
+    required this.name,
+    required this.type,
+    this.assignedAgentId,
+    required this.createdAt,
+  });
+
+  factory Location.fromFirestore(Map<String, dynamic> data) {
+    return Location(
+      id: data['id'],
+      name: data['name'],
+      type: data['type'] ?? 'van', // Default type
+      assignedAgentId: data['assignedAgentId'],
+      createdAt: (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
     );
   }
 
   Map<String, dynamic> toMap() => {
     'id': id,
-    'category': category,
-    'startDate': startDate,
-    'endDate': endDate,
-    'value': value,
+    'name': name,
     'type': type,
+    'assignedAgentId': assignedAgentId,
+    'createdAt': createdAt,
+
   };
 }
 
@@ -393,17 +468,23 @@ class Product {
   final String id;
   final String name;
   final double price;
-  final String category;
+  final DocumentReference categoryRef;
   final String barcode;
   final String? imageUrl;
+  final List<String> availableLocations;
+  final DocumentReference? reference;
+ 
 
   Product({
     required this.id,
     required this.name,
     required this.price,
-    required this.category,
+    required this.categoryRef,
     required this.barcode,
     this.imageUrl,
+    this.availableLocations = const [],
+    this.reference,
+
   });
 
   factory Product.fromFirestore(DocumentSnapshot doc) {
@@ -412,20 +493,23 @@ class Product {
       id: doc.id,
       name: data['name'] as String? ?? '',
       price: (data['price'] as num?)?.toDouble() ?? 0.0,
-      category: data['category'] as String? ?? '',
+      categoryRef: data['categoryRef'] as DocumentReference,
       barcode: data['barcode'] as String? ?? '',
       imageUrl: data['imageUrl'] as String?,
+      availableLocations: List<String>.from(data['availableLocations'] ?? []),
+
     );
   }
 
-  factory Product.fromMap(Map<String, dynamic> map) {
+  factory Product.fromMap(Map<String, dynamic> map, String id) {
     return Product(
       id: map['id'] as String? ?? '',
       name: map['name'] as String? ?? '',
       price: (map['price'] as num?)?.toDouble() ?? 0.0,
-      category: map['category'] as String? ?? '',
+      categoryRef: map['categoryRef'] as DocumentReference, 
       barcode: map['barcode'] as String? ?? '',
       imageUrl: map['imageUrl'] as String?,
+      
     );
   }
   
@@ -433,9 +517,11 @@ class Product {
     'id': id,
     'name': name,
     'price': price,
-    'category': category,
+    'categoryRef': categoryRef,
     'barcode': barcode,
     'imageUrl': imageUrl, 
+    'availableLocations': availableLocations,
+
   };
 }
 
@@ -448,6 +534,7 @@ import 'package:salesgo/models/product.dart';
 class Sale {
   final String id;
   final String agentId;
+  final String locationId;
   final DateTime date;
   final List<Product> products;
   final double totalAmount;
@@ -457,6 +544,7 @@ class Sale {
   Sale({
     required this.id,
     required this.agentId,
+    required this.locationId,
     required this.date,
     required this.products,
     required this.totalAmount,
@@ -468,6 +556,7 @@ class Sale {
   Map<String, dynamic> toMap() => {
     'id': id,
     'agentId': agentId,
+    'locationId': locationId,
     'date': date,
     'products': products.map((p) => p.toMap()).toList(),
     'totalAmount': totalAmount,
@@ -481,9 +570,10 @@ class Sale {
     return Sale(
       id: doc.id,
       agentId: data['agentId'] as String? ?? '',
+      locationId: data['locationId'] ?? '',
       date: (data['date'] as Timestamp?)?.toDate() ?? DateTime.now(),
       products: (data['products'] as List?)?.map((p) => 
-        Product.fromMap(p as Map<String, dynamic>)).toList() ?? [],
+        Product.fromMap(p as Map<String, dynamic>, p['id'] as String? ?? '')).toList() ?? [],
       totalAmount: (data['totalAmount'] as num?)?.toDouble() ?? 0.0,
       paymentMethod: data['paymentMethod'] as String? ?? '',
       couponCode: data['couponCode'] as String?,
@@ -492,7 +582,7 @@ class Sale {
 
   static List<Product> _parseProducts(dynamic productsData) {
     if (productsData is! List) return [];
-    return productsData.map((p) => Product.fromMap(p as Map<String, dynamic>)).toList();
+    return productsData.map((p) => Product.fromMap(p as Map<String, dynamic>, p['id'] as String? ?? '')).toList();
   }
 
 }
@@ -500,19 +590,23 @@ class Sale {
 models\user.dart:
 
 # models\user.dart
+import 'package:cloud_firestore/cloud_firestore.dart';
+
 class AppUser {
   final String uid;
   final String email;
   final String role;
-  final String? assignedCarId;
+  final String? assignedLocationId;
   final String name;
+  final DateTime createdAt;
 
   AppUser({
     required this.uid,
     required this.email,
     required this.role,
-    this.assignedCarId,
+    this.assignedLocationId,
     required this.name,
+    required this.createdAt,
   });
 
   factory AppUser.fromFirestore(Map<String, dynamic> data) {
@@ -520,10 +614,21 @@ class AppUser {
       uid: data['uid'] ?? '',
       email: data['email'] ?? '',
       role: data['role'] ?? 'agent',
-      assignedCarId: data['assignedCarId'],
-      name: data['name'] ?? 'Unknown',
+      assignedLocationId: data['assignedLocationId'],
+      name: data['name'] ?? 'Agent Name',
+      createdAt: (data['createdAt'] as Timestamp).toDate(),
     );
   }
+
+  Map<String, dynamic> toMap() => {
+    'uid': uid,
+    'email': email,
+    'role': role,
+    'assignedLocationId': assignedLocationId,
+    'name': name,
+    'createdAt': createdAt,
+  };
+
 }
 
 services\auth_service.dart:
@@ -645,6 +750,8 @@ services\firestore_service.dart:
 
 # services\firestore_service.dart
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/material.dart';
+import 'package:salesgo/models/discount.dart';
 import '../models/product.dart';
 import '../models/sale.dart';
 
@@ -664,14 +771,48 @@ class FirestoreService {
         : Product.fromFirestore(snapshot.docs.first);
   }
 
+  // For getting products by category
+  Future<List<Product>> getProductsByCategory(DocumentReference categoryRef) async {
+    final snapshot = await FirebaseFirestore.instance
+        .collection('products')
+        .where('categoryRef', isEqualTo: categoryRef)
+        .get();
+
+    return snapshot.docs.map((doc) => Product.fromFirestore(doc)).toList();
+  } 
+
+
+
+  Future<DocumentReference> getCategoryReference(String categoryId) async {
+    return FirebaseFirestore.instance.collection('categories').doc(categoryId);
+  }
+
   // Ventes
   Future<void> recordSale(Sale sale) async {
     await _firestore.collection('sales').add(sale.toMap());
   }
 
+  Stream<Map<String, int>> getMonthlySales(String locationId, DateTime firstDayOfMonth) {
+    return FirebaseFirestore.instance
+        .collection('sales')
+        .where('locationId', isEqualTo: locationId)
+        .where('timestamp', isGreaterThanOrEqualTo: firstDayOfMonth)
+        .snapshots()
+        .map((snapshot) {
+          final monthlySales = <String, int>{};
+          for (final doc in snapshot.docs) {
+            final sale = doc.data() as Map<String, dynamic>;
+            final productId = sale['productId'] as String;
+            final quantity = sale['quantity'] as int;
+            monthlySales[productId] = (monthlySales[productId] ?? 0) + quantity;
+          }
+          return monthlySales;
+        });
+  }  
+
   // Stocks
-  Stream<Map<String, int>> getCarStock(String carId) {
-    return _firestore.collection('cars/$carId/stock')
+  Stream<Map<String, int>> getLocationStock(String locationId) {
+    return _firestore.collection('locations/$locationId/stock')
       .snapshots()
       .map((snapshot) => {
         for (var doc in snapshot.docs)
@@ -685,6 +826,16 @@ class FirestoreService {
         .where('endDate', isGreaterThanOrEqualTo: now)
         .get();
   }
+
+  // For getting discounts by category
+  Future<List<Discount>> getDiscountsByCategory(DocumentReference categoryRef) async {
+    final snapshot = await FirebaseFirestore.instance
+        .collection('discounts')
+        .where('categoryRef', isEqualTo: categoryRef)
+        .get();
+
+    return snapshot.docs.map((doc) => Discount.fromFirestore(doc)).toList();
+  } 
 
   Future<List<Sale>> getAgentSales(String agentId) async {
     final snapshot = await _firestore.collection('sales')
@@ -707,12 +858,44 @@ class FirestoreService {
 
       return snapshot.docs.map((doc) => Sale.fromFirestore(doc)).toList();
     } catch (e) {
-      print('Error fetching sales: $e');
+      debugPrint('Error fetching sales: $e');
       return []; // Return empty list on error
     }
   }
 
+
+
+  // Categories
+  Future<void> addCategory(Map<String, dynamic> categoryData) async {
+    await _firestore.collection('categories').add(categoryData);
+  }
+
+  Stream<QuerySnapshot> getCategories() {
+    return _firestore.collection('categories').snapshots();
+  }
+
+  Future<void> deleteCategory(String categoryId) async {
+    await _firestore.collection('categories').doc(categoryId).delete();
+  }
+
+  // Discounts
+  Future<void> addDiscount(Map<String, dynamic> discountData) {
+    return _firestore.collection('discounts').add(discountData);
+  }
+
+  Future<void> updateDiscount(String id, Map<String, dynamic> discountData) {
+    return _firestore.collection('discounts').doc(id).update(discountData);
+  }
+
+  Stream<QuerySnapshot> getDiscounts() {
+    return _firestore.collection('discounts').snapshots();
+  }
+
+  Future<void> deleteDiscount(String id) {
+    return _firestore.collection('discounts').doc(id).delete();
+  }
 }
+
 
 
 
@@ -824,6 +1007,7 @@ class AuthViewModel with ChangeNotifier {
           email: user.email ?? '',
           name: name,
           role: role,
+          createdAt: DateTime.now(),
         );
         _userRole = role;
       }
@@ -832,12 +1016,39 @@ class AuthViewModel with ChangeNotifier {
     }
     notifyListeners();
   }
-  
+
+  // Add this method to update the current user
+  Future<void> updateCurrentUser(AppUser? user) async {
+    _currentUser = user;
+    _userRole = user?.role;
+    notifyListeners();
+  }
+
+  // Add this method to refresh user data from Firestore
+  Future<void> refreshUserData() async {
+    if (_currentUser == null) return;
+    
+    try {
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(_currentUser!.uid)
+          .get();
+      
+      if (userDoc.exists) {
+        await updateCurrentUser(AppUser.fromFirestore(userDoc.data()!));
+      }
+    } catch (e) {
+      debugPrint('Error refreshing user data: $e');
+    }
+  }
+
+
 }
 
 viewmodels\discount_vm.dart:
 
 # viewmodels\discount_vm.dart
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import '../services/firestore_service.dart';
 import '../models/discount.dart';
@@ -845,26 +1056,120 @@ import '../models/discount.dart';
 class DiscountViewModel with ChangeNotifier {
   final FirestoreService _firestoreService;
   List<Discount> _activeDiscounts = [];
+  bool _isLoading = false;
+  String? _error;
 
   DiscountViewModel({required FirestoreService firestoreService})
       : _firestoreService = firestoreService;
 
-  List<Discount> get activeDiscounts => _activeDiscounts;
+  List<Discount> get activeDiscounts => List.unmodifiable(_activeDiscounts);
+  bool get isLoading => _isLoading;
+  String? get error => _error;
 
   Future<void> loadActiveDiscounts() async {
-    final now = DateTime.now();
-    final snapshot = await _firestoreService.getActiveDiscounts(now);
-    _activeDiscounts = snapshot.docs
-      .map((doc) => Discount.fromFirestore(doc.data()))
-      .toList();
+    _setLoading(true);
+    _error = null;
+    
+    try {
+      final now = DateTime.now();
+      final snapshot = await _firestoreService.getActiveDiscounts(now);
+      
+      _activeDiscounts = snapshot.docs.map((doc) {
+        try {
+          return Discount.fromFirestore(doc);
+        } catch (e) {
+          debugPrint('Error parsing discount document ${doc.id}: $e');
+          return null;
+        }
+      }).whereType<Discount>().toList();
+      
+      notifyListeners();
+    } catch (e) {
+      _error = 'Failed to load discounts: ${e.toString()}';
+      debugPrint(_error!);
+      notifyListeners();
+      rethrow;
+    } finally {
+      _setLoading(false);
+    }
+  }
+
+  Future<List<Discount>> getDiscountsForCategory(DocumentReference categoryRef) async {
+    _setLoading(true);
+    try {
+      final discounts = await _firestoreService.getDiscountsByCategory(categoryRef);
+      return discounts.docs.map((doc) => Discount.fromFirestore(doc)).toList();
+    } catch (e) {
+      debugPrint('Error loading discounts for category: $e');
+      rethrow;
+    } finally {
+      _setLoading(false);
+    }
+  }
+
+  Future<void> addDiscount(Discount discount) async {
+    _setLoading(true);
+    try {
+      await _firestoreService.addDiscount(discount.toMap());
+      await loadActiveDiscounts(); // Refresh the list
+    } catch (e) {
+      _error = 'Failed to add discount: ${e.toString()}';
+      debugPrint(_error!);
+      rethrow;
+    } finally {
+      _setLoading(false);
+    }
+  }
+
+  Future<void> updateDiscount(Discount discount) async {
+    _setLoading(true);
+    try {
+      await _firestoreService.updateDiscount(discount.id, discount.toMap());
+      await loadActiveDiscounts(); // Refresh the list
+    } catch (e) {
+      _error = 'Failed to update discount: ${e.toString()}';
+      debugPrint(_error!);
+      rethrow;
+    } finally {
+      _setLoading(false);
+    }
+  }
+
+  Future<void> deleteDiscount(String discountId) async {
+    _setLoading(true);
+    try {
+      await _firestoreService.deleteDiscount(discountId);
+      _activeDiscounts.removeWhere((d) => d.id == discountId);
+      notifyListeners();
+    } catch (e) {
+      _error = 'Failed to delete discount: ${e.toString()}';
+      debugPrint(_error!);
+      rethrow;
+    } finally {
+      _setLoading(false);
+    }
+  }
+
+  void _setLoading(bool loading) {
+    _isLoading = loading;
     notifyListeners();
   }
+
+  void clearError() {
+    _error = null;
+    notifyListeners();
+  }
+}
+
+extension on List<Discount> {
+  get docs => null;
 }
 
 viewmodels\sales_vm.dart:
 
 # viewmodels\sales_vm.dart
 import 'package:flutter/material.dart';
+import 'package:salesgo/models/discount.dart';
 import 'package:salesgo/models/product.dart';
 import 'package:salesgo/models/sale.dart';
 import 'package:salesgo/services/firestore_service.dart';
@@ -874,6 +1179,7 @@ class SalesViewModel with ChangeNotifier {
   final List<Product> _cartItems = [];
   final FirestoreService _firestoreService;
   final Uuid _uuid = const Uuid();
+  final Map<String, Discount?> _selectedDiscounts = {};
 
   SalesViewModel({required FirestoreService firestoreService})
       : _firestoreService = firestoreService;
@@ -881,6 +1187,17 @@ class SalesViewModel with ChangeNotifier {
   List<Product> get cartItems => List.unmodifiable(_cartItems);
 
   double get totalAmount => _calculateTotal();
+
+  // Method to set selected discount for a product
+  void selectDiscountForProduct(String productId, Discount? discount) {
+    _selectedDiscounts[productId] = discount;
+    notifyListeners();
+  }
+
+  // Method to get selected discount for a product
+  Discount? getSelectedDiscountForProduct(String productId) {
+    return _selectedDiscounts[productId];
+  }  
 
   void addToCart(Product product) {
     _cartItems.add(product);
@@ -894,32 +1211,57 @@ class SalesViewModel with ChangeNotifier {
     }
   }
 
-  Future<void> confirmSale({
-    required String paymentMethod,
-    required String agentId,
-    String? couponCode,
-  }) async {
-    try {
-      if (_cartItems.isEmpty) {
-        throw Exception('Cannot confirm sale with empty cart');
-      }
 
-      final sale = Sale(
-        id: _uuid.v4(),
-        agentId: agentId,
-        date: DateTime.now(),
-        products: List.unmodifiable(_cartItems),
-        totalAmount: totalAmount,
-        paymentMethod: paymentMethod,
-        couponCode: couponCode,
-      );
-
-      await _firestoreService.recordSale(sale);
-      clearCart();
-    } catch (e) {
-      rethrow;
+Future<void> confirmSale({
+  required String paymentMethod,
+  required String agentId,
+  String? couponCode,
+}) async {
+  try {
+    if (_cartItems.isEmpty) {
+      throw Exception('Cannot confirm sale with empty cart');
     }
+
+    // Apply selected discounts to products
+    final discountedProducts = _cartItems.map((product) {
+      final discount = _selectedDiscounts[product.id];
+      if (discount != null) {
+        return Product(
+          id: product.id,
+          name: product.name,
+          price: _calculatePriceWithDiscount(product.price, discount),
+          categoryRef: product.categoryRef,
+          barcode: product.barcode,
+          imageUrl: product.imageUrl,
+        );
+      }
+      return product;
+    }).toList();
+
+    final sale = Sale(
+      id: _uuid.v4(),
+      agentId: agentId,
+      date: DateTime.now(),
+      products: discountedProducts,
+      totalAmount: discountedProducts.fold(0, (sum, item) => sum + item.price),
+      paymentMethod: paymentMethod,
+      couponCode: couponCode,
+      locationId: '',
+    );
+
+    await _firestoreService.recordSale(sale);
+    clearCart();
+    _selectedDiscounts.clear(); // Clear selected discounts after sale
+  } catch (e) {
+    rethrow;
   }
+}
+
+double _calculatePriceWithDiscount(double basePrice, Discount discount) {
+  return discount.type == '%' 
+      ? basePrice * (1 - discount.value / 100)
+      : basePrice - discount.value;
+}
 
   void clearCart() {
     _cartItems.clear();
@@ -934,33 +1276,78 @@ class SalesViewModel with ChangeNotifier {
 viewmodels\stock_vm.dart:
 
 # viewmodels\stock_vm.dart
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../services/firestore_service.dart';
 
 class StockViewModel with ChangeNotifier {
   final FirestoreService _firestoreService;
   Map<String, int> _stock = {};
+  Map<String, int> _monthlySales = {};
   bool _isLoading = false;
+  StreamSubscription<Map<String, int>>? _stockSubscription;
+  StreamSubscription<Map<String, int>>? _salesSubscription;
 
   StockViewModel({required FirestoreService firestoreService})
       : _firestoreService = firestoreService;
 
   Map<String, int> get stock => _stock;
+  Map<String, int> get monthlySales => _monthlySales;
   bool get isLoading => _isLoading;
 
-  void loadStock(String carId) {
+  Map<String, int> get adjustedStock {
+    final adjusted = <String, int>{};
+    _stock.forEach((productId, quantity) {
+      adjusted[productId] = quantity - (_monthlySales[productId] ?? 0);
+    });
+    return adjusted;
+  }
+
+  void loadStock(String locationId) {
+    _stockSubscription?.cancel();
+    _salesSubscription?.cancel();
+    
     _isLoading = true;
     notifyListeners();
     
-    _firestoreService.getCarStock(carId).listen((stockData) {
-      _stock = stockData;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      // Load current stock
+      _stockSubscription = _firestoreService.getLocationStock(locationId).listen(
+        (stockData) {
+          _stock = stockData;
+          _loadMonthlySales(locationId);
+        },
+        onError: (error) {
+          _isLoading = false;
+          notifyListeners();
+          debugPrint('Error loading stock: $error');
+        },
+      );
+    });
+  }
+
+  void _loadMonthlySales(String locationId) {
+    final now = DateTime.now();
+    final firstDayOfMonth = DateTime(now.year, now.month, 1);
+    
+    _salesSubscription = _firestoreService
+        .getMonthlySales(locationId, firstDayOfMonth)
+        .listen((salesData) {
+      _monthlySales = salesData;
       _isLoading = false;
       notifyListeners();
     }, onError: (error) {
       _isLoading = false;
       notifyListeners();
-      debugPrint('Error loading stock: $error');
+      debugPrint('Error loading monthly sales: $error');
     });
+  }
+
+  @override
+  void dispose() {
+    _stockSubscription?.cancel();
+    _salesSubscription?.cancel();
+    super.dispose();
   }
 }
 
@@ -1183,9 +1570,9 @@ views\admin\admin_home_screen.dart:
 # views\admin\admin_home_screen.dart
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:salesgo/views/admin/car_management.dart';
+import 'package:salesgo/views/admin/location_management.dart';
 import 'package:salesgo/views/admin/product_management.dart';
-import 'users_screen.dart';
+import 'users_management.dart';
 import 'stock_management.dart';
 import 'reports_screen.dart';
 import '../../viewmodels/auth_vm.dart';
@@ -1203,7 +1590,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
   static const List<Widget> _adminScreens = [
     UsersScreen(),
     ProductManagement(),
-    CarManagement(),
+    LocationManagement(),
     StockManagement(),
     ReportsScreen(),
   ];
@@ -1222,7 +1609,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Tableau de bord Admin'),
+        title: const Text('Admin Dashboard'),
         actions: [
           IconButton(
             icon: const Icon(Icons.logout),
@@ -1242,14 +1629,14 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.shopping_bag),
-            label: 'Produits',
+            label: 'Products',
           ),
           BottomNavigationBarItem(
-            icon: Icon(Icons.directions_car),
-            label: 'Véhicules',
+            icon: Icon(Icons.map),
+            label: 'Locations',
           ),
           BottomNavigationBarItem(
-            icon: Icon(Icons.inventory),
+            icon: Icon(Icons.warehouse_outlined),
             label: 'Stock',
           ),
           BottomNavigationBarItem(
@@ -1264,44 +1651,60 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
   }
 }
 
-views\admin\car_management.dart:
+views\admin\location_management.dart:
 
-# views\admin\car_management.dart
+# views\admin\location_management.dart
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:salesgo/models/car.dart';
+import 'package:salesgo/models/location.dart';
 import 'package:salesgo/models/user.dart';
 
-class CarManagement extends StatefulWidget {
-  const CarManagement({super.key});
+class LocationManagement extends StatefulWidget {
+  const LocationManagement({super.key});
 
   @override
-  _CarManagementState createState() => _CarManagementState();
+  _LocationManagementState createState() => _LocationManagementState();
 }
 
-class _CarManagementState extends State<CarManagement> {
+class _LocationManagementState extends State<LocationManagement> {
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
-  final _plateController = TextEditingController();
+  String _selectedType = 'van';
   String? _selectedAgentId;
 
-  Future<void> _addCar() async {
+  Future<void> _addLocation() async {
     if (_formKey.currentState!.validate()) {
       try {
-        final car = Car(
-          id: FirebaseFirestore.instance.collection('cars').doc().id,
+        final location = Location(
+          id: FirebaseFirestore.instance.collection('locations').doc().id,
           name: _nameController.text,
-          plateNumber: _plateController.text,
+          type: _selectedType,
           assignedAgentId: _selectedAgentId,
+          createdAt: DateTime.now(),
         );
 
-        await FirebaseFirestore.instance
-            .collection('cars')
-            .doc(car.id)
-            .set(car.toMap());
+        // Create a batch to update both documents atomically
+        final batch = FirebaseFirestore.instance.batch();
+        
+        // 1. Set the location document
+        final locationRef = FirebaseFirestore.instance
+            .collection('locations')
+            .doc(location.id);
+        batch.set(locationRef, location.toMap());
+        
+        // 2. If an agent is assigned, update the user document
+        if (_selectedAgentId != null) {
+          final userRef = FirebaseFirestore.instance
+              .collection('users')
+              .doc(_selectedAgentId);
+          batch.update(userRef, {'assignedLocationId': location.id});
+        }
+
+        // Commit both operations together
+        await batch.commit();
 
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Car added successfully')),
+          const SnackBar(content: Text('Location added successfully')),
         );
 
         // Clear form
@@ -1309,16 +1712,17 @@ class _CarManagementState extends State<CarManagement> {
         setState(() => _selectedAgentId = null);
       } catch (e) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error adding car: $e')),
+          SnackBar(content: Text('Error adding location: $e')),
         );
       }
     }
+  
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Car Management')),
+      appBar: AppBar(title: const Text('Location Management')),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Form(
@@ -1327,13 +1731,19 @@ class _CarManagementState extends State<CarManagement> {
             children: [
               TextFormField(
                 controller: _nameController,
-                decoration: const InputDecoration(labelText: 'Car Name'),
+                decoration: const InputDecoration(labelText: 'Location Name'),
                 validator: (value) => value!.isEmpty ? 'Required' : null,
               ),
-              TextFormField(
-                controller: _plateController,
-                decoration: const InputDecoration(labelText: 'Plate Number'),
-                validator: (value) => value!.isEmpty ? 'Required' : null,
+              const SizedBox(height: 20),
+              DropdownButtonFormField<String>(
+                value: _selectedType,
+                items: const [
+                  DropdownMenuItem(value: 'warehouse', child: Text('Warehouse')),
+                  DropdownMenuItem(value: 'store', child: Text('Store')),
+                  DropdownMenuItem(value: 'van', child: Text('Mobile Van')),
+                ],
+                onChanged: (value) => setState(() => _selectedType = value!),
+                decoration: const InputDecoration(labelText: 'Location Type'),
               ),
               const SizedBox(height: 20),
               const Text('Assign to Agent (optional)'),
@@ -1365,15 +1775,15 @@ class _CarManagementState extends State<CarManagement> {
               ),
               const SizedBox(height: 20),
               ElevatedButton(
-                onPressed: _addCar,
-                child: const Text('Add Car'),
+                onPressed: _addLocation,
+                child: const Text('Add Location'),
               ),
               const SizedBox(height: 20),
               const Divider(),
-              const Text('Existing Cars', style: TextStyle(fontSize: 18)),
+              const Text('Existing Locations', style: TextStyle(fontSize: 18)),
               const SizedBox(height: 10),
               StreamBuilder<QuerySnapshot>(
-                stream: FirebaseFirestore.instance.collection('cars').snapshots(),
+                stream: FirebaseFirestore.instance.collection('locations').snapshots(),
                 builder: (context, snapshot) {
                   if (!snapshot.hasData) {
                     return const CircularProgressIndicator();
@@ -1384,13 +1794,13 @@ class _CarManagementState extends State<CarManagement> {
                     itemCount: snapshot.data!.docs.length,
                     itemBuilder: (context, index) {
                       final doc = snapshot.data!.docs[index];
-                      final car = Car.fromFirestore(doc.data() as Map<String, dynamic>);
+                      final location = Location.fromFirestore(doc.data() as Map<String, dynamic>);
                       return ListTile(
-                        title: Text(car.name),
-                        subtitle: Text('Plate: ${car.plateNumber}'),
+                        title: Text(location.name),
+                        subtitle: Text('Type: ${location.type}'),
                         trailing: IconButton(
                           icon: const Icon(Icons.delete),
-                          onPressed: () => _deleteCar(doc.id),
+                          onPressed: () => _deleteLocation(doc.id),
                         ),
                       );
                     },
@@ -1404,15 +1814,15 @@ class _CarManagementState extends State<CarManagement> {
     );
   }
 
-  Future<void> _deleteCar(String carId) async {
+  Future<void> _deleteLocation(String locationId) async {
     try {
-      await FirebaseFirestore.instance.collection('cars').doc(carId).delete();
+      await FirebaseFirestore.instance.collection('locations').doc(locationId).delete();
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Car deleted')),
+        const SnackBar(content: Text('Location deleted')),
       );
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error deleting car: $e')),
+        SnackBar(content: Text('Error deleting location: $e')),
       );
     }
   }
@@ -1420,7 +1830,6 @@ class _CarManagementState extends State<CarManagement> {
   @override
   void dispose() {
     _nameController.dispose();
-    _plateController.dispose();
     super.dispose();
   }
 }
@@ -1434,7 +1843,10 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:intl/intl.dart';
 import 'package:salesgo/models/product.dart';
+import 'package:salesgo/models/discount.dart';
+import 'package:salesgo/models/category.dart';
 
 class ProductManagement extends StatefulWidget {
   const ProductManagement({super.key});
@@ -1443,14 +1855,46 @@ class ProductManagement extends StatefulWidget {
   _ProductManagementState createState() => _ProductManagementState();
 }
 
-class _ProductManagementState extends State<ProductManagement> {
+class _ProductManagementState extends State<ProductManagement> with SingleTickerProviderStateMixin {
+  late TabController _tabController;
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
   final _priceController = TextEditingController();
-  final _categoryController = TextEditingController();
+  String? _selectedProductCategory;
   final _barcodeController = TextEditingController();
   String? _imageUrl;
   bool _isLoading = false;
+  bool _hasDateRange = false; // New flag for date range toggle
+
+  // For categories
+  final _categoryNameController = TextEditingController();
+
+  // For discounts
+  final _discountNameController = TextEditingController();
+  final _discountValueController = TextEditingController();
+  final _discountTypeController = TextEditingController();
+  String? _selectedDiscountCategory;
+  DateTime? _discountStartDate;
+  DateTime? _discountEndDate;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 3, vsync: this);
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    _nameController.dispose();
+    _priceController.dispose();
+    _barcodeController.dispose();
+    _categoryNameController.dispose();
+    _discountNameController.dispose();
+    _discountValueController.dispose();
+    _discountTypeController.dispose();
+    super.dispose();
+  }
 
   Future<void> _pickImage() async {
     final picker = ImagePicker();
@@ -1479,11 +1923,16 @@ class _ProductManagementState extends State<ProductManagement> {
     if (_formKey.currentState!.validate()) {
       setState(() => _isLoading = true);
       try {
+
+        final categoryRef = FirebaseFirestore.instance
+            .collection('categories')
+            .doc(_selectedProductCategory);
+
         final product = Product(
           id: FirebaseFirestore.instance.collection('products').doc().id,
           name: _nameController.text,
           price: double.parse(_priceController.text),
-          category: _categoryController.text,
+          categoryRef: categoryRef, 
           barcode: _barcodeController.text,
           imageUrl: _imageUrl,
         );
@@ -1499,7 +1948,11 @@ class _ProductManagementState extends State<ProductManagement> {
 
         // Clear form
         _formKey.currentState!.reset();
-        setState(() => _imageUrl = null);
+        setState(() {
+          _imageUrl = null;
+          _selectedProductCategory = null;
+        });
+        Navigator.pop(context);
       } catch (e) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error adding product: $e')),
@@ -1510,86 +1963,292 @@ class _ProductManagementState extends State<ProductManagement> {
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Product Management')),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Form(
-          key: _formKey,
-          child: ListView(
-            children: [
-              TextFormField(
-                controller: _nameController,
-                decoration: const InputDecoration(labelText: 'Product Name'),
-                validator: (value) => value!.isEmpty ? 'Required' : null,
-              ),
-              TextFormField(
-                controller: _priceController,
-                decoration: const InputDecoration(labelText: 'Price'),
-                keyboardType: TextInputType.number,
-                validator: (value) => value!.isEmpty ? 'Required' : null,
-              ),
-              TextFormField(
-                controller: _categoryController,
-                decoration: const InputDecoration(labelText: 'Category'),
-                validator: (value) => value!.isEmpty ? 'Required' : null,
-              ),
-              TextFormField(
-                controller: _barcodeController,
-                decoration: const InputDecoration(labelText: 'Barcode'),
-                validator: (value) => value!.isEmpty ? 'Required' : null,
-              ),
-              const SizedBox(height: 20),
-              _imageUrl != null
-                  ? Image.network(_imageUrl!, height: 150)
-                  : Container(),
-              ElevatedButton(
-                onPressed: _pickImage,
-                child: const Text('Upload Image'),
-              ),
-              const SizedBox(height: 20),
-              ElevatedButton(
-                onPressed: _isLoading ? null : _addProduct,
-                child: _isLoading
-                    ? const CircularProgressIndicator()
-                    : const Text('Add Product'),
-              ),
-              const SizedBox(height: 20),
-              const Divider(),
-              const Text('Existing Products', style: TextStyle(fontSize: 18)),
-              const SizedBox(height: 10),
-              StreamBuilder<QuerySnapshot>(
-                stream: FirebaseFirestore.instance
-                    .collection('products')
-                    .snapshots(),
-                builder: (context, snapshot) {
-                  if (!snapshot.hasData) {
-                    return const CircularProgressIndicator();
-                  }
-                  return ListView.builder(
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    itemCount: snapshot.data!.docs.length,
-                    itemBuilder: (context, index) {
-                      final doc = snapshot.data!.docs[index];
-                      return ListTile(
-                        title: Text(doc['name']),
-                        subtitle: Text('€${doc['price']} - ${doc['category']}'),
-                        trailing: IconButton(
-                          icon: const Icon(Icons.delete),
-                          onPressed: () => _deleteProduct(doc.id),
-                        ),
-                      );
-                    },
-                  );
-                },
-              ),
-            ],
-          ),
-        ),
-      ),
+  Future<void> _updateProduct(String productId) async {
+    if (_formKey.currentState!.validate()) {
+      setState(() => _isLoading = true);
+      try {
+
+        final categoryRef = FirebaseFirestore.instance
+            .collection('categories')
+            .doc(_selectedProductCategory);
+
+        await FirebaseFirestore.instance
+            .collection('products')
+            .doc(productId)
+            .update({
+              'name': _nameController.text,
+              'price': double.parse(_priceController.text),
+              'categoryRef': categoryRef, // Using DocumentReference
+              'barcode': _barcodeController.text,
+              'imageUrl': _imageUrl,
+            });
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Product updated successfully')),
+        );
+        Navigator.pop(context);
+      } catch (e) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error updating product: $e')),
+        );
+      } finally {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  Future<void> _addCategory() async {
+    if (_categoryNameController.text.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Category name is required')),
+      );
+      return;
+    }
+
+    setState(() => _isLoading = true);
+    try {
+      await FirebaseFirestore.instance.collection('categories').add({
+        'name': _categoryNameController.text,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Category added successfully')),
+      );
+
+      // Clear form
+      _categoryNameController.clear();
+      Navigator.pop(context);
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error adding category: $e')),
+      );
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _updateCategory(String categoryId) async {
+    if (_categoryNameController.text.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Category name is required')),
+      );
+      return;
+    }
+
+    setState(() => _isLoading = true);
+    try {
+      final categoryRef = FirebaseFirestore.instance.collection('categories').doc(categoryId);
+      final oldName = (await categoryRef.get()).data()?['name'];
+      final newName = _categoryNameController.text;
+
+      // 1. First update the category name
+      await categoryRef.update({'name': newName});
+
+      // 2. Update all products in this category
+      final productsQuery = await FirebaseFirestore.instance
+          .collection('products')
+          .where('categoryId', isEqualTo: oldName)
+          .get();
+
+      final batch = FirebaseFirestore.instance.batch();
+      for (final doc in productsQuery.docs) {
+        batch.update(doc.reference, {'categoryId': newName});
+      }
+
+      // 3. Update all discounts for this category
+      final discountsQuery = await FirebaseFirestore.instance
+          .collection('discounts')
+          .where('categoryId', isEqualTo: oldName)
+          .get();
+
+      for (final doc in discountsQuery.docs) {
+        batch.update(doc.reference, {'categoryId': newName});
+      }
+
+      // Commit all updates in a single batch
+      await batch.commit();
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Category and related items updated successfully')),
+      );
+      Navigator.pop(context);
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error updating category: $e')),
+      );
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _addDiscount() async {
+    if (_discountNameController.text.isEmpty ||
+        _discountValueController.text.isEmpty ||
+        _discountTypeController.text.isEmpty ||
+        _selectedDiscountCategory == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Required fields are missing')),
+      );
+      return;
+    }
+
+    // Only validate dates if the user has enabled date range
+    if (_hasDateRange) {
+      if (_discountStartDate == null || _discountEndDate == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Date range is enabled but not set')),
+        );
+        return;
+      }
+
+      if (_discountEndDate!.isBefore(_discountStartDate!)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('End date must be after start date')),
+        );
+        return;
+      }
+    }
+
+    setState(() => _isLoading = true);
+    try {
+      final categoryRef = FirebaseFirestore.instance
+          .collection('categories')
+          .doc(_selectedDiscountCategory);
+
+      final discountData = {
+        'id': FirebaseFirestore.instance.collection('discounts').doc().id,
+        'name': _discountNameController.text,
+        'categoryRef': categoryRef,  // Store DocumentReference
+        'value': double.parse(_discountValueController.text),
+        'type': _discountTypeController.text,
+        'hasDateRange': _hasDateRange,
+        if (_hasDateRange) 'startDate': _discountStartDate!,
+        if (_hasDateRange) 'endDate': _discountEndDate!,
+      };
+
+      await FirebaseFirestore.instance
+          .collection('discounts')
+          .doc(discountData['id'] as String?)
+          .set(discountData);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Discount added successfully')),
+      );
+
+      // Clear form
+      _discountNameController.clear();
+      _discountValueController.clear();
+      _discountTypeController.clear();
+      setState(() {
+        _selectedDiscountCategory = null;
+        _discountStartDate = null;
+        _discountEndDate = null;
+        _hasDateRange = false;
+      });
+      Navigator.pop(context);
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error adding discount: $e')),
+      );
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _updateDiscount(String discountId) async {
+    if (_discountNameController.text.isEmpty ||
+        _discountValueController.text.isEmpty ||
+        _discountTypeController.text.isEmpty ||
+        _selectedDiscountCategory == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Required fields are missing')),
+      );
+      return;
+    }
+
+    // Only validate dates if date range is enabled
+    if (_hasDateRange) {
+      if (_discountStartDate == null || _discountEndDate == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Date range is enabled but dates are not set')),
+        );
+        return;
+      }
+      if (_discountEndDate!.isBefore(_discountStartDate!)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('End date must be after start date')),
+        );
+        return;
+      }
+    }
+
+    setState(() => _isLoading = true);
+    try {
+      final categoryRef = FirebaseFirestore.instance
+          .collection('categories')
+          .doc(_selectedDiscountCategory);
+
+      final updateData = {
+        'name': _discountNameController.text,
+        'categoryRef': categoryRef,  // Store DocumentReference
+        'value': double.parse(_discountValueController.text),
+        'type': _discountTypeController.text,
+        'hasDateRange': _hasDateRange,
+      };
+
+      // Conditionally update dates
+      if (_hasDateRange) {
+        updateData['startDate'] = _discountStartDate!;
+        updateData['endDate'] = _discountEndDate!;
+      } else {
+        // Remove dates if date range is disabled
+        updateData['startDate'] = FieldValue.delete();
+        updateData['endDate'] = FieldValue.delete();
+      }
+
+      await FirebaseFirestore.instance
+          .collection('discounts')
+          .doc(discountId)
+          .update(updateData);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Discount updated successfully')),
+      );
+      Navigator.pop(context);
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error updating discount: $e')),
+      );
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+  // Update the _editDiscount method to handle the new hasDateRange field
+  Future<void> _editDiscount(DocumentSnapshot discount) async {
+    final data = discount.data() as Map<String, dynamic>;
+    _discountNameController.text = data['name'] ?? '';
+    _discountValueController.text = data['value'].toString();
+    _discountTypeController.text = data['type'];
+    // Get the category ID from the DocumentReference
+    final categoryRef = data['categoryRef'] as DocumentReference;
+    final categorySnapshot = await categoryRef.get();
+    _selectedDiscountCategory = categorySnapshot.id;    
+
+    setState(() {
+      _hasDateRange = data['hasDateRange'] ?? false;
+      if (_hasDateRange) {
+        _discountStartDate = (data['startDate'] as Timestamp).toDate();
+        _discountEndDate = (data['endDate'] as Timestamp).toDate();
+      } else {
+        _discountStartDate = null;
+        _discountEndDate = null;
+      }
+    });
+
+    await showDialog(
+      context: context,
+      builder: (context) => _buildDiscountForm(isEditing: true, discountId: discount.id),
     );
   }
 
@@ -1609,13 +2268,585 @@ class _ProductManagementState extends State<ProductManagement> {
     }
   }
 
+  Future<void> _deleteCategory(String categoryId) async {
+    try {
+      await FirebaseFirestore.instance
+          .collection('categories')
+          .doc(categoryId)
+          .delete();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Category deleted')),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error deleting category: $e')),
+      );
+    }
+  }
+
+  Future<void> _deleteDiscount(String discountId) async {
+    try {
+      await FirebaseFirestore.instance
+          .collection('discounts')
+          .doc(discountId)
+          .delete();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Discount deleted successfully')),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error deleting discount: ${e.toString()}')),
+      );
+    }
+  }
+
+  Future<void> _selectStartDate(BuildContext context) async {
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: DateTime.now(),
+      firstDate: DateTime.now(),
+      lastDate: DateTime(2101),
+    );
+    if (picked != null && picked != _discountStartDate) {
+      setState(() {
+        _discountStartDate = picked;
+      });
+    }
+  }
+
+  Future<void> _selectEndDate(BuildContext context) async {
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: _discountStartDate ?? DateTime.now(),
+      firstDate: _discountStartDate ?? DateTime.now(),
+      lastDate: DateTime(2101),
+    );
+    if (picked != null && picked != _discountEndDate) {
+      setState(() {
+        _discountEndDate = picked;
+      });
+    }
+  }
+
+  Future<void> _editProduct(Product product) async {
+    _nameController.text = product.name;
+    _priceController.text = product.price.toString();
+    
+    // Get the category ID from the DocumentReference
+    final categorySnapshot = await product.categoryRef.get();
+    _selectedProductCategory = categorySnapshot.id;
+    
+    _barcodeController.text = product.barcode;
+    setState(() => _imageUrl = product.imageUrl);
+
+    await showDialog(
+      context: context,
+      builder: (context) => _buildProductForm(isEditing: true, productId: product.id),
+    );
+  }
+
+  Future<void> _editCategory(DocumentSnapshot category) async {
+    _categoryNameController.text = category['name'];
+
+    await showDialog(
+      context: context,
+      builder: (context) => _buildCategoryForm(isEditing: true, categoryId: category.id),
+    );
+  }
+
   @override
-  void dispose() {
-    _nameController.dispose();
-    _priceController.dispose();
-    _categoryController.dispose();
-    _barcodeController.dispose();
-    super.dispose();
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Product Management'),
+        bottom: TabBar(
+          controller: _tabController,
+          tabs: const [
+            Tab(icon: Icon(Icons.shopping_bag), text: 'Products'),
+            Tab(icon: Icon(Icons.category), text: 'Categories'),
+            Tab(icon: Icon(Icons.discount), text: 'Discounts'),
+          ],
+        ),
+      ),
+      body: TabBarView(
+        controller: _tabController,
+        children: [
+          // Products Tab
+          _buildProductsTab(),
+          // Categories Tab
+          _buildCategoriesTab(),
+          // Discount & Loyalty Tab
+          _buildDiscountsTab(),
+        ],
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () {
+          switch (_tabController.index) {
+            case 0: // Products tab
+              _nameController.clear();
+              _priceController.clear();
+              _barcodeController.clear();
+              setState(() {
+                _imageUrl = null;
+                _selectedProductCategory = null;
+              });
+              showDialog(
+                context: context,
+                builder: (context) => _buildProductForm(),
+              );
+              break;
+            case 1: // Categories tab
+              _categoryNameController.clear();
+              //setState(() => _categoryImageUrl = null);
+              showDialog(
+                context: context,
+                builder: (context) => _buildCategoryForm(),
+              );
+              break;
+            case 2: // Discounts tab
+              _discountNameController.clear();
+              _discountValueController.clear();
+              _discountTypeController.clear();
+              setState(() {
+                _selectedDiscountCategory = null;
+                _discountStartDate = null;
+                _discountEndDate = null;
+              });
+              showDialog(
+                context: context,
+                builder: (context) => _buildDiscountForm(),
+              );
+              break;
+          }
+        },
+        child: const Icon(Icons.add),
+      ),
+    );
+  }
+
+  Widget _buildProductsTab() {
+    return Padding(
+      padding: const EdgeInsets.all(16.0),
+      child: StreamBuilder<QuerySnapshot>(
+        stream: FirebaseFirestore.instance.collection('products').snapshots(),
+        builder: (context, snapshot) {
+          if (!snapshot.hasData) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          return ListView.builder(
+            itemCount: snapshot.data!.docs.length,
+            itemBuilder: (context, index) {
+              final doc = snapshot.data!.docs[index];
+              final product = Product.fromFirestore(doc);
+              
+              return FutureBuilder<DocumentSnapshot>(
+                future: product.categoryRef.get(),
+                builder: (context, categorySnapshot) {
+                  if (!categorySnapshot.hasData) {
+                    return ListTile(
+                      leading: product.imageUrl != null 
+                          ? Image.network(product.imageUrl!, width: 50, height: 50)
+                          : const Icon(Icons.shopping_bag),
+                      title: Text(product.name),
+                      subtitle: Text('€${product.price} - Loading category...'),
+                    );
+                  }
+                  
+                  final categoryName = categorySnapshot.data!['name'] ?? 'Unknown';
+                  
+                  return ListTile(
+                    leading: product.imageUrl != null 
+                        ? Image.network(product.imageUrl!, width: 50, height: 50)
+                        : const Icon(Icons.shopping_bag),
+                    title: Text(product.name),
+                    subtitle: Text('€${product.price} - $categoryName'),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.edit),
+                          onPressed: () => _editProduct(product),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.delete),
+                          onPressed: () => _deleteProduct(doc.id),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildCategoriesTab() {
+    return Padding(
+      padding: const EdgeInsets.all(16.0),
+      child: StreamBuilder<QuerySnapshot>(
+        stream: FirebaseFirestore.instance.collection('categories').snapshots(),
+        builder: (context, snapshot) {
+          if (!snapshot.hasData) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          return ListView.builder(
+            itemCount: snapshot.data!.docs.length,
+            itemBuilder: (context, index) {
+              final doc = snapshot.data!.docs[index];
+              return ListTile(
+                leading: const Icon(Icons.category),
+                title: Text(doc['name']),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.edit),
+                      onPressed: () => _editCategory(doc),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.delete),
+                      onPressed: () => _deleteCategory(doc.id),
+                    ),
+                  ],
+                ),
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+
+  // Update the _buildDiscountsTab method to show date range info
+  Widget _buildDiscountsTab() {
+    return Padding(
+      padding: const EdgeInsets.all(16.0),
+      child: StreamBuilder<QuerySnapshot>(
+        stream: FirebaseFirestore.instance.collection('discounts').snapshots(),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+
+          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+            return const Center(
+              child: Text(
+                'No discounts available',
+                style: TextStyle(fontSize: 16),
+              ),
+            );
+          }
+
+          return ListView.builder(
+            itemCount: snapshot.data!.docs.length,
+            itemBuilder: (context, index) {
+              final doc = snapshot.data!.docs[index];
+              final discount = Discount.fromFirestore(doc);
+
+              return FutureBuilder<DocumentSnapshot>(
+                future: discount.categoryRef.get(),
+                builder: (context, categorySnapshot) {
+                  final categoryName = categorySnapshot.hasData
+                      ? categorySnapshot.data!.get('name') ?? 'Unknown Category'
+                      : 'Loading...';
+
+                  return Card(
+                    margin: const EdgeInsets.symmetric(vertical: 8),
+                    child: ListTile(
+                      leading: const Icon(Icons.discount, color: Colors.orange),
+                      title: Text(discount.name),
+                      subtitle: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Category: $categoryName'),
+                          Text(
+                            '${discount.value}${discount.type} discount',
+                            style: const TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                          Text(
+                            'Valid: ${DateFormat('MMM dd').format(discount.startDate)} - '
+                            '${DateFormat('MMM dd, yyyy').format(discount.endDate)}',
+                          ),
+                          if (discount.isActive)
+                            Chip(
+                              label: const Text('Active'),
+                              backgroundColor: Colors.green[100],
+                            )
+                          else
+                            Chip(
+                              label: const Text('Expired'),
+                              backgroundColor: Colors.red[100],
+                            ),
+                        ],
+                      ),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.edit),
+                            onPressed: () => _editDiscount(doc),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.delete, color: Colors.red),
+                            onPressed: () => _deleteDiscount(doc.id),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+
+  String _formatDate(DateTime date) {
+    return '${date.day}/${date.month}/${date.year}';
+  }
+
+  Widget _buildProductForm({bool isEditing = false, String? productId}) {
+    return AlertDialog(
+      title: Text(isEditing ? 'Edit Product' : 'Add New Product'),
+      content: SingleChildScrollView(
+        child: Form(
+          key: _formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextFormField(
+                controller: _nameController,
+                decoration: const InputDecoration(labelText: 'Product Name'),
+                validator: (value) => value!.isEmpty ? 'Required' : null,
+              ),
+              TextFormField(
+                controller: _priceController,
+                decoration: const InputDecoration(labelText: 'Price'),
+                keyboardType: TextInputType.number,
+                validator: (value) => value!.isEmpty ? 'Required' : null,
+              ),
+              StreamBuilder<QuerySnapshot>(
+                stream: FirebaseFirestore.instance.collection('categories').snapshots(),
+                builder: (context, snapshot) {
+                  if (!snapshot.hasData) return const SizedBox();
+                  
+                  final categories = snapshot.data!.docs.map((doc) {
+                    return DropdownMenuItem<String>(
+                      value: doc.id,
+                      child: Text(doc['name']),
+                    );
+                  }).toList();
+                  
+                  return DropdownButtonFormField<String>(
+                    value: _selectedProductCategory,
+                    decoration: const InputDecoration(labelText: 'Category'),
+                    items: categories,
+                    onChanged: (value) {
+                      setState(() {
+                        _selectedProductCategory = value;
+                      });
+                    },
+                    validator: (value) => value == null ? 'Please select a category' : null,
+                  );
+                },
+              ),
+              TextFormField(
+                controller: _barcodeController,
+                decoration: const InputDecoration(labelText: 'Barcode'),
+                validator: (value) => value!.isEmpty ? 'Required' : null,
+              ),
+              const SizedBox(height: 20),
+              _imageUrl != null
+                  ? Image.network(_imageUrl!, height: 150)
+                  : Container(),
+              ElevatedButton(
+                onPressed: _isLoading ? null : _pickImage,
+                child: _isLoading 
+                    ? const CircularProgressIndicator()
+                    : const Text('Upload Image'),
+              )
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        ElevatedButton(
+          onPressed: () => isEditing 
+              ? _updateProduct(productId!)
+              : _addProduct(),
+          child: Text(isEditing ? 'Update' : 'Add'),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildCategoryForm({bool isEditing = false, String? categoryId}) {
+    return AlertDialog(
+      title: Text(isEditing ? 'Edit Category' : 'Add New Category'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextFormField(
+              controller: _categoryNameController,
+              decoration: const InputDecoration(labelText: 'Category Name'),
+              validator: (value) => value!.isEmpty ? 'Required' : null,
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        ElevatedButton(
+          onPressed: () => isEditing 
+              ? _updateCategory(categoryId!)
+              : _addCategory(),
+          child: Text(isEditing ? 'Update' : 'Add'),
+        ),
+      ],
+    );
+  }
+
+  // Update the _buildDiscountForm method
+Widget _buildDiscountForm({bool isEditing = false, String? discountId}) {
+  return StatefulBuilder(
+    builder: (BuildContext context, StateSetter setDialogState) {
+      return AlertDialog(
+        title: Text(isEditing ? 'Edit Discount' : 'Add New Discount'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextFormField(
+                controller: _discountNameController,
+                decoration: const InputDecoration(labelText: 'Discount Name'),
+                validator: (value) => value!.isEmpty ? 'Required' : null,
+              ),
+              TextFormField(
+                controller: _discountValueController,
+                decoration: const InputDecoration(labelText: 'Value'),
+                keyboardType: TextInputType.number,
+                validator: (value) => value!.isEmpty ? 'Required' : null,
+              ),
+              TextFormField(
+                controller: _discountTypeController,
+                decoration: const InputDecoration(labelText: 'Type (e.g., %, \$)'),
+                validator: (value) => value!.isEmpty ? 'Required' : null,
+              ),
+              StreamBuilder<QuerySnapshot>(
+                stream: FirebaseFirestore.instance.collection('categories').snapshots(),
+                builder: (context, snapshot) {
+                  if (!snapshot.hasData) return const SizedBox();
+                  
+                  final categories = snapshot.data!.docs.map((doc) {
+                    return DropdownMenuItem<String>(
+                      value: doc.id,  // Use document ID instead of name
+                      child: Text(doc['name']),
+                    );
+                  }).toList();
+                  
+                  return DropdownButtonFormField<String>(
+                    value: _selectedDiscountCategory,
+                    decoration: const InputDecoration(labelText: 'Category'),
+                    items: categories,
+                    onChanged: (value) {
+                      setDialogState(() {
+                        _selectedDiscountCategory = value;
+                      });
+                    },
+                    validator: (value) => value == null ? 'Please select a category' : null,
+                    );
+                  },
+                ),
+                const SizedBox(height: 10),
+                SwitchListTile(
+                  title: const Text('Date Range'),
+                  value: _hasDateRange,
+                  onChanged: (bool value) {
+                    setDialogState(() {
+                      _hasDateRange = value;
+                      if (!value) {
+                        _discountStartDate = null;
+                        _discountEndDate = null;
+                      }
+                    });
+                  },
+                ),
+                if (_hasDateRange) ...[
+                  const SizedBox(height: 10),
+                  ListTile(
+                    title: Text(
+                      _discountStartDate == null 
+                          ? 'Select Start Date' 
+                          : 'Start: ${_formatDate(_discountStartDate!)}'
+                    ),
+                    trailing: const Icon(Icons.calendar_today),
+                    onTap: () async {
+                      final date = await showDatePicker(
+                        context: context,
+                        initialDate: DateTime.now(),
+                        firstDate: DateTime.now(),
+                        lastDate: DateTime(2101),
+                      );
+                      if (date != null) {
+                        setDialogState(() => _discountStartDate = date);
+                      }
+                    },
+                  ),
+                  ListTile(
+                    title: Text(
+                      _discountEndDate == null 
+                          ? 'Select End Date' 
+                          : 'End: ${_formatDate(_discountEndDate!)}'
+                    ),
+                    trailing: const Icon(Icons.calendar_today),
+                    onTap: () async {
+                      final date = await showDatePicker(
+                        context: context,
+                        initialDate: _discountStartDate ?? DateTime.now(),
+                        firstDate: _discountStartDate ?? DateTime.now(),
+                        lastDate: DateTime(2101),
+                      );
+                      if (date != null) {
+                        setDialogState(() => _discountEndDate = date);
+                      }
+                    },
+                  ),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                if (isEditing) {
+                  _updateDiscount(discountId!);
+                } else {
+                  _addDiscount();
+                }
+              },
+              child: Text(isEditing ? 'Update' : 'Add'),
+            ),
+          ],
+        );
+      },
+    );
   }
 }
 
@@ -1705,8 +2936,9 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
-import '../../viewmodels/auth_vm.dart';
-import '../../models/product.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:salesgo/viewmodels/auth_vm.dart';
+
 
 class StockManagement extends StatefulWidget {
   const StockManagement({super.key});
@@ -1716,30 +2948,115 @@ class StockManagement extends StatefulWidget {
 }
 
 class _StockManagementState extends State<StockManagement> {
-  String? _selectedCarId;
+  String? _selectedLocationId;
   final _formKey = GlobalKey<FormState>();
   final _productController = TextEditingController();
   final _quantityController = TextEditingController();
   List<Map<String, dynamic>> _products = [];
+  Map<String, dynamic>? _selectedProduct;
+  bool _isScanning = false;
+  bool _isProcessingBarcode = false; // Prevent duplicate scans
+  late MobileScannerController _scannerController;
+  bool _isLoadingProducts = true; // Track product loading state
 
   @override
   void initState() {
     super.initState();
+    _scannerController = MobileScannerController();
     _loadProducts();
   }
 
+  @override
+  void dispose() {
+    _productController.dispose();
+    _quantityController.dispose();
+    _scannerController.dispose();
+    super.dispose();
+  }
+
   Future<void> _loadProducts() async {
-    final snapshot = await FirebaseFirestore.instance.collection('products').get();
+    try {
+      final snapshot = await FirebaseFirestore.instance
+          .collection('products')
+          .get();
+      
+      if (mounted) {
+        setState(() {
+          _products = snapshot.docs.map((doc) {
+            final data = doc.data();
+            return {
+              'id': doc.id,
+              'name': data['name'] ?? 'Unknown Product',
+              'barcode': data['barcode'] ?? '',
+              'category': data['category'] ?? '',
+            };
+          }).toList();
+          _isLoadingProducts = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isLoadingProducts = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to load products: ${e.toString()}')),
+        );
+      }
+    }
+  }
+
+  void _toggleScanning() {
+    if (_isProcessingBarcode) return;
+    
     setState(() {
-      _products = snapshot.docs.map((doc) {
-        final data = doc.data();
-        return {
-          'id': doc.id,
-          'name': data['name'] ?? 'Unknown Product',
-          'category': data['category'] ?? '',
-        };
-      }).toList();
+      _isScanning = !_isScanning;
+      if (_isScanning) {
+        _scannerController.start();
+      } else {
+        _scannerController.stop();
+      }
     });
+  }
+
+  void _handleBarcodeScan(BarcodeCapture capture) {
+    if (_isProcessingBarcode || capture.barcodes.isEmpty) return;
+    
+    final barcode = capture.barcodes.first.rawValue;
+    if (barcode == null || barcode.isEmpty) return;
+
+    setState(() => _isProcessingBarcode = true);
+
+    try {
+      // Find product in preloaded data
+      final product = _products.firstWhere(
+        (p) => p['barcode'] == barcode,
+        orElse: () => {},
+      );
+
+      if (mounted) {
+        if (product.isNotEmpty) {
+          setState(() {
+            _selectedProduct = product;
+            _productController.text = '${product['name']} (${product['barcode']})';
+            _isScanning = false;
+          });
+          _scannerController.stop();
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Product not found for this barcode')),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error processing barcode: ${e.toString()}')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isProcessingBarcode = false);
+      }
+    }
   }
 
   @override
@@ -1747,264 +3064,320 @@ class _StockManagementState extends State<StockManagement> {
     final authVM = Provider.of<AuthViewModel>(context, listen: false);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Stock Management')),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          children: [
-            // Car Selection Dropdown
-            StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance.collection('cars').snapshots(),
-              builder: (context, snapshot) {
-                if (!snapshot.hasData) return const CircularProgressIndicator();
-                
-                return DropdownButtonFormField<String>(
-                  value: _selectedCarId,
-                  decoration: const InputDecoration(
-                    labelText: 'Select Car',
-                    border: OutlineInputBorder(),
-                  ),
-                  items: snapshot.data!.docs.map((doc) {
-                    final car = doc.data() as Map<String, dynamic>;
-                    return DropdownMenuItem<String>(
-                      value: doc.id,
-                      child: Text('${car['name']} (${car['plateNumber']})'),
-                    );
-                  }).toList(),
-                  onChanged: (value) => setState(() => _selectedCarId = value),
-                  validator: (value) => value == null ? 'Please select a car' : null,
-                );
-              },
-            ),
-            const SizedBox(height: 20),
-            
-            // Stock Assignment Form
-            Form(
-              key: _formKey,
-              child: Column(
-                children: [
-                  Autocomplete<String>(
-                    optionsBuilder: (TextEditingValue textEditingValue) {
-                      if (textEditingValue.text.isEmpty) {
-                        return const Iterable<String>.empty();
-                      }
-                      return _products
-                          .where((product) => product['name']
-                              .toLowerCase()
-                              .contains(textEditingValue.text.toLowerCase()))
-                          .map((product) => product['id']);
-                    },
-                    onSelected: (String selection) {
-                      _productController.text = selection;
-                    },
-                    fieldViewBuilder: (
-                      BuildContext context,
-                      TextEditingController textEditingController,
-                      FocusNode focusNode,
-                      VoidCallback onFieldSubmitted,
-                    ) {
-                      return TextFormField(
-                        controller: textEditingController,
-                        focusNode: focusNode,
-                        decoration: const InputDecoration(
-                          labelText: 'Search Product',
-                          border: OutlineInputBorder(),
+      appBar: AppBar(
+        title: const Text('Stock Management'),
+        actions: [
+          IconButton(
+            icon: _isScanning 
+                ? const Icon(Icons.cancel, color: Colors.red)
+                : const Icon(Icons.qr_code_scanner),
+            onPressed: _isProcessingBarcode ? null : _toggleScanning,
+          ),
+        ],
+      ),
+      body: Stack(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Column(
+              children: [
+                // Scanner overlay
+                if (_isScanning)
+                  Container(
+                    height: 200,
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.blue),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Stack(
+                      children: [
+                        MobileScanner(
+                          controller: _scannerController,
+                          onDetect: _handleBarcodeScan,
                         ),
-                      );
-                    },
-                    optionsViewBuilder: (
-                      BuildContext context,
-                      AutocompleteOnSelected<String> onSelected,
-                      Iterable<String> options,
-                    ) {
-                      return Align(
-                        alignment: Alignment.topLeft,
-                        child: Material(
-                          elevation: 4.0,
-                          child: SizedBox(
-                            height: 200,
-                            child: ListView.builder(
-                              padding: EdgeInsets.zero,
-                              itemCount: options.length,
-                              itemBuilder: (BuildContext context, int index) {
-                                final option = options.elementAt(index);
-                                final product = _products.firstWhere(
-                                  (p) => p['id'] == option,
-                                  orElse: () => {'name': 'Unknown'},
-                                );
-                                return InkWell(
-                                  onTap: () {
-                                    onSelected(option);
-                                  },
-                                  child: Padding(
-                                    padding: const EdgeInsets.all(16.0),
-                                    child: Text(product['name']),
-                                  ),
-                                );
-                              },
-                            ),
+                        if (_isProcessingBarcode)
+                          const Center(
+                            child: CircularProgressIndicator(),
                           ),
-                        ),
-                      );
-                    },
-                  ),
-                  const SizedBox(height: 16),
-                  TextFormField(
-                    controller: _quantityController,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(
-                      labelText: 'Quantity',
-                      border: OutlineInputBorder(),
+                      ],
                     ),
-                    validator: (value) {
-                      if (value == null || value.isEmpty) {
-                        return 'Please enter quantity';
-                      }
-                      if (int.tryParse(value) == null) {
-                        return 'Please enter a valid number';
-                      }
-                      return null;
-                    },
                   ),
-                  const SizedBox(height: 20),
-                  ElevatedButton(
-                    onPressed: _assignStock,
-                    style: ElevatedButton.styleFrom(
-                      minimumSize: const Size(double.infinity, 50),
-                    ),
-                    child: const Text('Assign Stock'),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 20),
-            const Divider(),
-            
-            // Stock History Section (Admin Only)
-            if (authVM.userRole == 'admin')
-              Expanded(
-                child: Column(
-                  children: [
-                    const Text(
-                      'Stock History',
-                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 10),
-                    Expanded(
-                      child: StreamBuilder<QuerySnapshot>(
-                        stream: FirebaseFirestore.instance
-                            .collection('stockHistory')
-                            .orderBy('timestamp', descending: true)
-                            .snapshots(),
-                        builder: (context, snapshot) {
-                          if (!snapshot.hasData) {
-                            return const Center(child: CircularProgressIndicator());
+                if (_isScanning) const SizedBox(height: 16),
+                
+                // Location Selection Dropdown
+                StreamBuilder<QuerySnapshot>(
+                  stream: FirebaseFirestore.instance.collection('locations').snapshots(),
+                  builder: (context, snapshot) {
+                    if (!snapshot.hasData) return const CircularProgressIndicator();
+                    
+                    return DropdownButtonFormField<String>(
+                      value: _selectedLocationId,
+                      decoration: const InputDecoration(
+                        labelText: 'Select Location',
+                        border: OutlineInputBorder(),
+                      ),
+                      items: snapshot.data!.docs.map((doc) {
+                        final location = doc.data() as Map<String, dynamic>;
+                        return DropdownMenuItem<String>(
+                          value: doc.id,
+                          child: Text('${location['name']} (${location['type']})'),
+                        );
+                      }).toList(),
+                      onChanged: (value) => setState(() => _selectedLocationId = value),
+                      validator: (value) => value == null ? 'Please select a location' : null,
+                    );
+                  },
+                ),
+                const SizedBox(height: 20),
+                
+                // Stock Assignment Form
+                Form(
+                  key: _formKey,
+                  child: Column(
+                    children: [
+                      Autocomplete<Map<String, dynamic>>(
+                        optionsBuilder: (TextEditingValue textEditingValue) {
+                          if (textEditingValue.text.isEmpty) {
+                            return const Iterable<Map<String, dynamic>>.empty();
                           }
-                          
-                          return ListView.builder(
-                            itemCount: snapshot.data!.docs.length,
-                            itemBuilder: (context, index) {
-                              final doc = snapshot.data!.docs[index];
-                              final data = doc.data() as Map<String, dynamic>;
-                              
-                              return FutureBuilder(
-                                future: Future.wait([
-                                  FirebaseFirestore.instance
-                                      .collection('cars')
-                                      .doc(data['carId'])
-                                      .get(),
-                                  FirebaseFirestore.instance
-                                      .collection('products')
-                                      .doc(data['productId'])
-                                      .get(),
-                                  FirebaseFirestore.instance
-                                      .collection('users')
-                                      .doc(data['adminId'])
-                                      .get(),
-                                ]),
-                                builder: (context, AsyncSnapshot<List<DocumentSnapshot>> snapshot) {
-                                  if (!snapshot.hasData) {
-                                    return const ListTile(
-                                      title: Text('Loading...'),
-                                    );
-                                  }
-                                  
-                                  final car = snapshot.data![0].data() as Map<String, dynamic>? ?? {};
-                                  final product = snapshot.data![1].data() as Map<String, dynamic>? ?? {};
-                                  final admin = snapshot.data![2].data() as Map<String, dynamic>? ?? {};
-                                  
-                                  return Card(
-                                    margin: const EdgeInsets.symmetric(vertical: 4),
-                                    child: ListTile(
-                                      title: Text(product['name'] ?? 'Unknown Product'),
-                                      subtitle: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          Text('Car: ${car['name']} (${car['plateNumber']})'),
-                                          Text('Quantity: ${data['quantity']}'),
-                                          Text('Admin: ${admin['email']}'),
-                                        ],
-                                      ),
-                                      trailing: Text(
-                                        DateFormat('dd/MM/yy HH:mm').format(
-                                          (data['timestamp'] as Timestamp).toDate(),
+                          return _products.where((product) => 
+                            product['name'].toLowerCase().contains(textEditingValue.text.toLowerCase()) ||
+                            (product['barcode']?.toString() ?? '').contains(textEditingValue.text)
+                          );
+                        },
+                        onSelected: (Map<String, dynamic> selection) {
+                          setState(() {
+                            _selectedProduct = selection;
+                            _productController.text = '${selection['name']} (${selection['barcode']})';
+                          });
+                        },
+                        displayStringForOption: (Map<String, dynamic> option) => 
+                          '${option['name']} (${option['barcode']})',
+                        fieldViewBuilder: (
+                          BuildContext context,
+                          TextEditingController textEditingController,
+                          FocusNode focusNode,
+                          VoidCallback onFieldSubmitted,
+                        ) {
+                          // Sync the internal controller with our _productController
+                          _productController.addListener(() {
+                            if (_productController.text != textEditingController.text) {
+                              textEditingController.text = _productController.text;
+                            }
+                          });
+
+                          return TextFormField(
+                            controller: textEditingController, // Use the Autocomplete's controller
+                            focusNode: focusNode,
+                            decoration: const InputDecoration(
+                              labelText: 'Search Product',
+                              border: OutlineInputBorder(),
+                            ),
+                            validator: (value) {
+                              if (value == null || value.isEmpty) {
+                                return 'Please select a product';
+                              }
+                              return null;
+                            },
+                          );
+                        },
+                        optionsViewBuilder: (
+                          BuildContext context,
+                          AutocompleteOnSelected<Map<String, dynamic>> onSelected,
+                          Iterable<Map<String, dynamic>> options,
+                        ) {
+                          return Align(
+                            alignment: Alignment.topLeft,
+                            child: Material(
+                              elevation: 4.0,
+                              child: SizedBox(
+                                height: 200,
+                                child: ListView.builder(
+                                  padding: EdgeInsets.zero,
+                                  itemCount: options.length,
+                                  itemBuilder: (BuildContext context, int index) {
+                                    final product = options.elementAt(index);
+                                    return InkWell(
+                                      onTap: () {
+                                        onSelected(product);
+                                        _productController.text = '${product['name']} (${product['barcode']})';
+                                      },
+                                      child: Padding(
+                                        padding: const EdgeInsets.all(16.0),
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              product['name'],
+                                              style: const TextStyle(fontWeight: FontWeight.bold),
+                                            ),
+                                            Text('Barcode: ${product['barcode']}'),
+                                          ],
                                         ),
                                       ),
-                                    ),
+                                    );
+                                  },
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                      const SizedBox(height: 16),
+                      TextFormField(
+                        controller: _quantityController,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(
+                          labelText: 'Quantity',
+                          border: OutlineInputBorder(),
+                        ),
+                        validator: (value) {
+                          if (value == null || value.isEmpty) {
+                            return 'Please enter quantity';
+                          }
+                          if (int.tryParse(value) == null) {
+                            return 'Please enter a valid number';
+                          }
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 20),
+                      ElevatedButton(
+                        onPressed: _assignStock,
+                        style: ElevatedButton.styleFrom(
+                          minimumSize: const Size(double.infinity, 50),
+                        ),
+                        child: const Text('Assign Stock'),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 20),
+                const Divider(),
+                
+                // Stock History Section (Admin Only)
+                if (authVM.userRole == 'admin')
+                  Expanded(
+                    child: Column(
+                      children: [
+                        const Text(
+                          'Stock History',
+                          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                        ),
+                        const SizedBox(height: 10),
+                        Expanded(
+                          child: StreamBuilder<QuerySnapshot>(
+                            stream: FirebaseFirestore.instance
+                                .collection('stockHistory')
+                                .orderBy('timestamp', descending: true)
+                                .snapshots(),
+                            builder: (context, snapshot) {
+                              if (!snapshot.hasData) {
+                                return const Center(child: CircularProgressIndicator());
+                              }
+                              
+                              return ListView.builder(
+                                itemCount: snapshot.data!.docs.length,
+                                itemBuilder: (context, index) {
+                                  final doc = snapshot.data!.docs[index];
+                                  final data = doc.data() as Map<String, dynamic>;
+                                  
+                                  return FutureBuilder(
+                                    future: Future.wait([
+                                      FirebaseFirestore.instance
+                                          .collection('locations')
+                                          .doc(data['locationId'])
+                                          .get(),
+                                      FirebaseFirestore.instance
+                                          .collection('products')
+                                          .doc(data['productId'])
+                                          .get(),
+                                      FirebaseFirestore.instance
+                                          .collection('users')
+                                          .doc(data['adminId'])
+                                          .get(),
+                                    ]),
+                                    builder: (context, AsyncSnapshot<List<DocumentSnapshot>> snapshot) {
+                                      if (!snapshot.hasData) {
+                                        return const ListTile(
+                                          title: Text('Loading...'),
+                                        );
+                                      }
+                                      
+                                      final location = snapshot.data![0].data() as Map<String, dynamic>? ?? {};
+                                      final product = snapshot.data![1].data() as Map<String, dynamic>? ?? {};
+                                      final admin = snapshot.data![2].data() as Map<String, dynamic>? ?? {};
+                                      
+                                      return Card(
+                                        margin: const EdgeInsets.symmetric(vertical: 4),
+                                        child: ListTile(
+                                          title: Text(product['name'] ?? 'Unknown Product'),
+                                          subtitle: Column(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              Text('Location: ${location['name']} (${location['type']})'),
+                                              Text('Quantity: ${data['quantity']}'),
+                                              Text('Admin: ${admin['email']}'),
+                                            ],
+                                          ),
+                                          trailing: Text(
+                                            DateFormat('dd/MM/yy HH:mm').format(
+                                              (data['timestamp'] as Timestamp).toDate(),
+                                            ),
+                                          ),
+                                        ),
+                                      );
+                                    },
                                   );
                                 },
                               );
                             },
-                          );
-                        },
-                      ),
+                          ),
+                        ),
+                      ],
                     ),
-                  ],
-                ),
-              ),
-          ],
-        ),
+                  ),
+              ],
+            ),
+          ),
+          if (_isLoadingProducts)
+            const Center(child: CircularProgressIndicator()),
+        ],
       ),
     );
   }
 
   Future<void> _assignStock() async {
-    if (_selectedCarId == null) {
+    if (_selectedLocationId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please select a car')),
+        const SnackBar(content: Text('Please select a location')),
+      );
+      return;
+    }
+
+    if (_selectedProduct == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please select a product')),
       );
       return;
     }
 
     if (_formKey.currentState!.validate()) {
-      final productId = _productController.text;
+      final productId = _selectedProduct!['id'];
       final quantity = int.parse(_quantityController.text);
       final authVM = Provider.of<AuthViewModel>(context, listen: false);
 
       try {
-        // Verify product exists
-        final productDoc = await FirebaseFirestore.instance
-            .collection('products')
-            .doc(productId)
-            .get();
-
-        if (!productDoc.exists) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Product does not exist')),
-          );
-          return;
-        }
-
         // Update stock
         await FirebaseFirestore.instance
-            .collection('cars/$_selectedCarId/stock')
+            .collection('locations/$_selectedLocationId/stock')
             .doc(productId)
             .set({'quantity': quantity});
 
         // Record history if admin
         if (authVM.userRole == 'admin') {
           await FirebaseFirestore.instance.collection('stockHistory').add({
-            'carId': _selectedCarId,
+            'locationId': _selectedLocationId,
             'productId': productId,
             'quantity': quantity,
             'timestamp': DateTime.now(),
@@ -2019,26 +3392,20 @@ class _StockManagementState extends State<StockManagement> {
         // Clear form
         _productController.clear();
         _quantityController.clear();
+        setState(() => _selectedProduct = null);
         FocusScope.of(context).requestFocus(FocusNode());
       } catch (e) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error updating stock: $e')),
+          SnackBar(content: Text('Error updating stock: ${e.toString()}')),
         );
       }
     }
   }
-
-  @override
-  void dispose() {
-    _productController.dispose();
-    _quantityController.dispose();
-    super.dispose();
-  }
 }
 
-views\admin\users_screen.dart:
+views\admin\users_management.dart:
 
-# views\admin\users_screen.dart
+# views\admin\users_management.dart
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:provider/provider.dart';
@@ -2052,7 +3419,7 @@ class UsersScreen extends StatelessWidget {
     Provider.of<AuthViewModel>(context);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Gestion des Agents')),
+      appBar: AppBar(title: const Text('Agent Management')),
       floatingActionButton: FloatingActionButton(
         child: const Icon(Icons.add),
         onPressed: () => _createNewUser(context),
@@ -2123,9 +3490,9 @@ class _AgentHomeScreenState extends State<AgentHomeScreen> {
       final discountVM = context.read<DiscountViewModel>();
       final authVM = context.read<AuthViewModel>();
       
-      // Load stock for the assigned car (if any)
-      if (authVM.currentUser?.assignedCarId != null) {
-        stockVM.loadStock(authVM.currentUser!.assignedCarId!);
+      // Load stock for the assigned location (if any)
+      if (authVM.currentUser?.assignedLocationId != null) {
+        stockVM.loadStock(authVM.currentUser!.assignedLocationId!);
       }
       
       // Load active discounts
@@ -2143,10 +3510,24 @@ class _AgentHomeScreenState extends State<AgentHomeScreen> {
     setState(() => _selectedIndex = index);
   }
 
+  void _logout(BuildContext context) async {
+    final authVM = Provider.of<AuthViewModel>(context, listen: false);
+    await authVM.signOut();
+    Navigator.pushReplacementNamed(context, '/');
+  }
+  
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Tableau de bord Agent')),
+      appBar: AppBar(
+        title: const Text('Coach Mobile Dashboard'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.logout),
+            onPressed: () => _logout(context),
+          ),
+        ],
+      ),
       body: _agentScreens.elementAt(_selectedIndex),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _selectedIndex,
@@ -2154,7 +3535,7 @@ class _AgentHomeScreenState extends State<AgentHomeScreen> {
         items: const [
           BottomNavigationBarItem(
             icon: Icon(Icons.point_of_sale),
-            label: 'Ventes',
+            label: 'Sales',
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.inventory_2),
@@ -2162,7 +3543,7 @@ class _AgentHomeScreenState extends State<AgentHomeScreen> {
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.history),
-            label: 'Historique',
+            label: 'History',
           ),
         ],
       ),
@@ -2174,11 +3555,57 @@ views\agent\history_screen.dart:
 
 # views\agent\history_screen.dart
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:salesgo/models/product.dart';
 import 'package:salesgo/models/sale.dart';
+import 'package:salesgo/models/discount.dart';
 import '../../viewmodels/auth_vm.dart';
 import '../../widgets/sale_item.dart';
+
+class ProductSalesData {
+  List<Sale> sales;
+  int totalQuantity;
+  double totalAmount;
+  final Product product;
+
+  ProductSalesData({
+    required this.product,
+    List<Sale>? sales,
+    this.totalQuantity = 0,
+    this.totalAmount = 0.0,
+  }) : sales = sales ?? [];
+}
+
+class CategorySalesData {
+  final List<Sale> sales;
+  int totalQuantity;
+  double totalAmount;
+  final String categoryId;
+  String? categoryName;
+
+  CategorySalesData({
+    required this.categoryId,
+    List<Sale>? sales,
+    this.totalQuantity = 0,
+    this.totalAmount = 0.0,
+  }) : sales = sales ?? [];
+}
+
+class DiscountSalesData {
+  final List<Sale> sales;
+  int totalQuantity;
+  double totalAmount;
+  final String discountName;
+
+  DiscountSalesData({
+    required this.discountName,
+    List<Sale>? sales,
+    this.totalQuantity = 0,
+    this.totalAmount = 0.0,
+  }) : sales = sales ?? [];
+}
 
 class HistoryScreen extends StatefulWidget {
   const HistoryScreen({super.key});
@@ -2188,7 +3615,8 @@ class HistoryScreen extends StatefulWidget {
 }
 
 class _HistoryScreenState extends State<HistoryScreen> {
-  String _selectedFilter = 'week';
+  String _selectedFilter = 'day';
+  String _groupBy = 'product';
   late DateTimeRange _dateRange;
 
   @override
@@ -2237,23 +3665,51 @@ class _HistoryScreenState extends State<HistoryScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Historique des Ventes'),
+        title: const Text('Sales History'),
         actions: [
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.filter_alt),
+            tooltip: 'Group by',
+            onSelected: (value) => setState(() => _groupBy = value),
+            itemBuilder: (context) {
+              final options = {
+                'none': 'No grouping',
+                'product': 'Group by product',
+                'category': 'Group by category',
+                'discount': 'Group by discount',
+                'payment': 'Group by payment method',
+              };
+
+              return options.entries.map((entry) {
+                return PopupMenuItem<String>(
+                  value: entry.key,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(entry.value),
+                      if (_groupBy == entry.key)
+                        const Icon(Icons.check, color: Colors.blueAccent),
+                    ],
+                  ),
+                );
+              }).toList();
+            },
+          ),
+
           DropdownButton<String>(
             value: _selectedFilter,
+            icon: const Icon(Icons.date_range),
+            style: const TextStyle(color: Color.fromARGB(255, 0, 0, 0)),
+            dropdownColor: const Color.fromARGB(255, 255, 255, 255),            
             items: const [
               DropdownMenuItem(value: 'day', child: Text('Today')),
-              DropdownMenuItem(value: 'week', child: Text('Current Week')),
-              DropdownMenuItem(value: 'month', child: Text('Current Month')),
+              DropdownMenuItem(value: 'week', child: Text('This Week')),
+              DropdownMenuItem(value: 'month', child: Text('This Month')),
             ],
-            onChanged: (value) {
-              if (value != null) {
-                setState(() {
-                  _selectedFilter = value;
-                  _updateDateRange();
-                });
-              }
-            },
+            onChanged: (value) => setState(() {
+              _selectedFilter = value!;
+              _updateDateRange();
+            }),
           ),
         ],
       ),
@@ -2270,12 +3726,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
             return const Center(child: CircularProgressIndicator());
           }
 
-          if (snapshot.hasError) {
-            return Center(child: Text('Error: ${snapshot.error}'));
-          }
-
           if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-            return const Center(child: Text('Aucune vente trouvée'));
+            return const Center(child: Text('No sales found'));
           }
 
           final sales = snapshot.data!.docs.map((doc) {
@@ -2287,14 +3739,332 @@ class _HistoryScreenState extends State<HistoryScreen> {
             }
           }).whereType<Sale>().toList();
 
-          return ListView.builder(
-            itemCount: sales.length,
-            itemBuilder: (context, index) => SaleItem(sale: sales[index]),
-          );
+          switch (_groupBy) {
+            case 'none': return _buildSalesList(sales);
+            case 'product': return _buildGroupedByProduct(sales);
+            case 'category': return _buildGroupedByCategory(sales);
+            case 'discount': return _buildGroupedByDiscount(sales);
+            case 'payment': return _buildGroupedByPayment(sales);
+            default: return _buildSalesList(sales);
+          }
         },
       ),
     );
   }
+
+  Widget _buildSalesList(List<Sale> sales) {
+    return ListView.builder(
+      itemCount: sales.length,
+      itemBuilder: (context, index) => SaleItem(sale: sales[index]),
+    );
+  }
+
+  Widget _buildGroupedByProduct(List<Sale> sales) {
+    final productGroups = <String, ProductSalesData>{};
+    
+    for (final sale in sales) {
+      final productsInSale = <String, int>{}; // <productId, quantity>
+
+      for (final product in sale.products) {
+        productsInSale.update(product.id, (value) => value + 1, ifAbsent: () => 1);
+      }
+
+      for (final entry in productsInSale.entries) {
+        final productId = entry.key;
+        final quantity = entry.value;
+        final product = sale.products.firstWhere((p) => p.id == productId);
+
+        productGroups.putIfAbsent(productId, () => ProductSalesData(
+          product: product,
+          sales: [],
+        ));
+
+        // Ajoute une seule fois la vente
+        productGroups[productId]!.sales.add(sale);
+
+        // Calcule correctement la quantité
+        productGroups[productId]!.totalQuantity += quantity;
+        productGroups[productId]!.totalAmount += product.price * quantity;
+      }
+    }
+
+
+    return ListView(
+      children: productGroups.entries.map((entry) {
+        final data = entry.value;
+        return ExpansionTile(
+          leading: data.product.imageUrl != null 
+              ? Image.network(data.product.imageUrl!, width: 40, height: 40)
+              : const Icon(Icons.shopping_bag),
+          title: Text(data.product.name),
+          subtitle: Text('${data.totalQuantity} items - Total: €${data.totalAmount.toStringAsFixed(2)}'),
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  FutureBuilder<DocumentSnapshot>(
+                    future: data.product.categoryRef.get(),
+                    builder: (context, snapshot) {
+                      if (snapshot.hasData) {
+                        final category = snapshot.data!.get('name') ?? 'Uncategorized';
+                        return Text('Category: $category');
+                      }
+                      return const Text('Category: Loading...');
+                    },
+                  ),
+                  //Text('Category: ${data.product.categoryRef}'),
+                  Text('Unit price: €${data.product.price.toStringAsFixed(2)}'),
+                  const SizedBox(height: 8),
+                  const Text('Recent sales:', style: TextStyle(fontWeight: FontWeight.bold)),
+                  ...data.sales.take(3).map((sale) {
+                    final quantityInSale = sale.products.where((p) => p.id == data.product.id).length;
+                    return ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text('Sale #${sale.id.substring(0, 6)}'),
+                      subtitle: Text(DateFormat('MMM dd, HH:mm').format(sale.date)),
+                      trailing: Text('$quantityInSale × €${data.product.price.toStringAsFixed(2)}'),
+                    );
+                  }).toList(),
+                  if (data.sales.length > 3)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8.0),
+                      child: Text('+ ${data.sales.length - 3} more transactions',
+                          style: TextStyle(color: Colors.grey[600])),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        );
+      }).toList(),
+    );
+  }
+
+Widget _buildGroupedByCategory(List<Sale> sales) {
+  final categoryGroups = <String, CategorySalesData>{};
+  
+  // Group sales by category
+  for (final sale in sales) {
+    final categoryQuantities = <String, int>{};
+    final categoryAmounts = <String, double>{};
+    final productsByCategory = <String, Product>{};
+
+    for (final product in sale.products) {
+      final categoryId = product.categoryRef.id;
+
+      categoryQuantities.update(categoryId, (value) => value + 1, ifAbsent: () => 1);
+      categoryAmounts.update(categoryId, (value) => value + product.price, ifAbsent: () => product.price);
+      
+      // Sauvegarder un produit par catégorie pour le prix (on peut en prendre un arbitraire)
+      productsByCategory[categoryId] = product;
+    }
+
+    for (final categoryId in categoryQuantities.keys) {
+      categoryGroups.putIfAbsent(categoryId, () => CategorySalesData(
+        categoryId: categoryId,
+        sales: [],
+      ));
+
+      categoryGroups[categoryId]!.sales.add(sale);
+      categoryGroups[categoryId]!.totalQuantity += categoryQuantities[categoryId]!;
+      categoryGroups[categoryId]!.totalAmount += categoryAmounts[categoryId]!;
+    }
+  }
+
+
+  return ListView(
+    children: categoryGroups.entries.map((entry) {
+      final data = entry.value;
+      
+      return FutureBuilder<DocumentSnapshot>(
+        future: data.categoryId.contains('/')
+            ? FirebaseFirestore.instance.doc(data.categoryId).get()
+            : FirebaseFirestore.instance.collection('categories').doc(data.categoryId).get(),
+        builder: (context, snapshot) {
+          // Get category name or fallback
+          final categoryName = snapshot.hasData 
+              ? snapshot.data!.get('name') ?? 'Uncategorized'
+              : 'Loading...';
+          
+          return ExpansionTile(
+            leading: const Icon(Icons.category),
+            title: Text(categoryName),
+            subtitle: Text(
+              '${data.totalQuantity} items - Total: €${data.totalAmount.toStringAsFixed(2)}',
+            ),
+            children: [
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Top products:',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 8),
+                    FutureBuilder<List<Product>>(
+                      future: _getTopProductsInCategory(sales, data.categoryId),
+                      builder: (context, productSnapshot) {
+                        if (!productSnapshot.hasData) {
+                          return const CircularProgressIndicator();
+                        }
+                        return Column(
+                          children: productSnapshot.data!.take(3).map((product) {
+                            return ListTile(
+                              contentPadding: EdgeInsets.zero,
+                              leading: product.imageUrl != null
+                                  ? Image.network(
+                                      product.imageUrl!,
+                                      width: 40,
+                                      height: 40,
+                                    )
+                                  : const Icon(Icons.shopping_bag),
+                              title: Text(product.name),
+                              subtitle: Text('€${product.price.toStringAsFixed(2)}'),
+                            );
+                          }).toList(),
+                        );
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                    const Text(
+                      'Recent sales:',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    ...data.sales.take(3).map((sale) {
+                      final quantityInCategory = sale.products
+                          .where((p) => p.categoryRef.id == data.categoryId)
+                          .length;
+                      final amountInCategory = sale.products
+                          .where((p) => p.categoryRef.id == data.categoryId)
+                          .fold(0.0, (sum, p) => sum + p.price);
+                      
+                      return ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: Text('Sale #${sale.id.substring(0, 6)}'),
+                        subtitle: Text(
+                          DateFormat('MMM dd, HH:mm').format(sale.date),
+                        ),
+                        trailing: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text('$quantityInCategory items'),
+                            Text('€${amountInCategory.toStringAsFixed(2)}'),
+                          ],
+                        ),
+                      );
+                    }).toList(),
+                    if (data.sales.length > 3)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8.0),
+                        child: Text(
+                          '+ ${data.sales.length - 3} more transactions',
+                          style: TextStyle(color: Colors.grey[600]),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          );
+        },
+      );
+    }).toList(),
+  );
+}
+
+Future<List<Product>> _getTopProductsInCategory(List<Sale> sales, String categoryId) async {
+  final productCounts = <Product, int>{};
+  
+  for (final sale in sales) {
+    for (final product in sale.products.where((p) => p.categoryRef.id == categoryId)) {
+      productCounts[product] = (productCounts[product] ?? 0) + 1;
+    }
+  }
+  
+  // Sort products by count in descending order
+  final sortedProducts = productCounts.entries.toList()
+    ..sort((a, b) => b.value.compareTo(a.value));
+  
+  return sortedProducts.map((entry) => entry.key).toList();
+}
+
+  Widget _buildGroupedByDiscount(List<Sale> sales) {
+    final discountGroups = <String, DiscountSalesData>{};
+    
+    for (final sale in sales) {
+      final discountName = sale.couponCode ?? 'No discount';
+      if (!discountGroups.containsKey(discountName)) {
+        discountGroups[discountName] = DiscountSalesData(discountName: discountName);
+      }
+      
+      discountGroups[discountName]!.sales.add(sale);
+      discountGroups[discountName]!.totalQuantity += sale.products.length;
+      discountGroups[discountName]!.totalAmount += sale.totalAmount;
+    }
+
+    return ListView(
+      children: discountGroups.entries.map((entry) {
+        final data = entry.value;
+        
+        return ExpansionTile(
+          leading: const Icon(Icons.discount),
+          title: Text(data.discountName),
+          subtitle: Text('${data.totalQuantity} items - Total: €${data.totalAmount.toStringAsFixed(2)}'),
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Recent sales:', style: TextStyle(fontWeight: FontWeight.bold)),
+                  ...data.sales.take(3).map((sale) {
+                    return ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text('Sale #${sale.id.substring(0, 6)}'),
+                      subtitle: Text(DateFormat('MMM dd, HH:mm').format(sale.date)),
+                      trailing: Text('€${sale.totalAmount.toStringAsFixed(2)}'),
+                    );
+                  }).toList(),
+                ],
+              ),
+            ),
+          ],
+        );
+      }).toList(),
+    );
+  }
+
+  Widget _buildGroupedByPayment(List<Sale> sales) {
+    final paymentGroups = <String, List<Sale>>{};
+    for (final sale in sales) {
+      paymentGroups.putIfAbsent(sale.paymentMethod, () => []).add(sale);
+    }
+
+    return ListView(
+      children: paymentGroups.entries.map((entry) {
+        final paymentMethod = entry.key;
+        final paymentSales = entry.value;
+        final totalAmount = paymentSales.fold<double>(0, (sum, sale) => sum + sale.totalAmount);
+
+        return ExpansionTile(
+          title: Text(paymentMethod.toUpperCase()),
+          subtitle: Text('${paymentSales.length} sales - Total: €${totalAmount.toStringAsFixed(2)}'),
+          children: paymentSales.map((sale) {
+            return ListTile(
+              title: Text('Sale #${sale.id.substring(0, 8)}'),
+              subtitle: Text(DateFormat('dd/MM/yy HH:mm').format(sale.date)),
+              trailing: Text('€${sale.totalAmount.toStringAsFixed(2)}'),
+            );
+          }).toList(),
+        );
+      }).toList(),
+    );
+  }
+
 }
 
 views\agent\sales_screen.dart:
@@ -2321,6 +4091,7 @@ class _SalesScreenState extends State<SalesScreen> {
   final FirestoreService _firestoreService = FirestoreService();
   bool _isScanning = true;
   bool _isProcessingPayment = false;
+  bool _hasScanned = false; // New flag to track if we've scanned a product
 
   @override
   void dispose() {
@@ -2335,7 +4106,7 @@ class _SalesScreenState extends State<SalesScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('New Sale'),
+        title: const Text('Quick Sale'),
         actions: [
           IconButton(
             icon: Icon(_isScanning ? Icons.no_photography : Icons.qr_code_scanner),
@@ -2353,7 +4124,15 @@ class _SalesScreenState extends State<SalesScreen> {
                   itemCount: salesVM.cartItems.length,
                   itemBuilder: (context, index) => ProductDetailsCard(
                     product: salesVM.cartItems[index],
-                    onRemove: () => salesVM.removeFromCart(index),
+                    onRemove: () {
+                      salesVM.removeFromCart(index);
+                      // Reset scan state when product is removed
+                      if (salesVM.cartItems.isEmpty) {
+                        setState(() {
+                          _hasScanned = false;
+                        });
+                      }
+                    },
                   ),
                 ),
               ),
@@ -2389,7 +4168,11 @@ class _SalesScreenState extends State<SalesScreen> {
       ),
       child: MobileScanner(
         controller: _scannerController,
-        onDetect: (capture) => _handleBarcodeScan(capture, context, salesVM),
+        onDetect: (capture) {
+          if (!_hasScanned) { // Only scan if we haven't already scanned a product
+            _handleBarcodeScan(capture, context, salesVM);
+          }
+        },
       ),
     );
   }
@@ -2399,10 +4182,16 @@ class _SalesScreenState extends State<SalesScreen> {
     BuildContext context,
     SalesViewModel salesVM,
   ) async {
-    if (capture.barcodes.isEmpty) return;
-    
+    if (capture.barcodes.isEmpty || _hasScanned) return; // Prevent multiple scans
+
     final barcode = capture.barcodes.first.rawValue;
     if (barcode == null) return;
+
+    setState(() {
+      _hasScanned = true; // Ensure scanning stops
+      _isScanning = false;
+    });
+    _scannerController.stop(); // Stop scanning immediately
 
     try {
       final product = await _firestoreService.getProductByBarcode(barcode);
@@ -2410,24 +4199,32 @@ class _SalesScreenState extends State<SalesScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Product not found')),
         );
+        setState(() => _hasScanned = false); // Allow scanning again if product is not found
         return;
       }
+
       salesVM.addToCart(product);
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error: ${e.toString()}')),
       );
+      setState(() => _hasScanned = false); // Allow re-scanning in case of error
     }
   }
 
+
   void _toggleScanning() {
-    setState(() => _isScanning = !_isScanning);
-    if (_isScanning) {
-      _scannerController.start();
-    } else {
-      _scannerController.stop();
-    }
+    setState(() {
+      _isScanning = !_isScanning;
+      if (_isScanning) {
+        _hasScanned = false; // Reset scanning state when re-enabling scanner
+        _scannerController.start();
+      } else {
+        _scannerController.stop();
+      }
+    });
   }
+
 
   Future<void> _handleSaleConfirmation(
     BuildContext context,
@@ -2457,11 +4254,12 @@ class _SalesScreenState extends State<SalesScreen> {
       );
 
       // Reset the screen after successful payment
-      _scannerController.start();
       setState(() {
         _isScanning = true;
         _isProcessingPayment = false;
+        _hasScanned = false; // Reset scan state for new sale
       });
+      _scannerController.start();
       
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -2475,12 +4273,13 @@ class _SalesScreenState extends State<SalesScreen> {
   }
 }
 
-views\agent\stock_screen.dart:
+views\agent\stock_screen copy.dart:
 
-# views\agent\stock_screen.dart
+# views\agent\stock_screen copy.dart
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:provider/provider.dart';
+import 'package:intl/intl.dart';
 import '../../viewmodels/stock_vm.dart';
 import '../../models/product.dart';
 import '../../viewmodels/auth_vm.dart';
@@ -2492,112 +4291,184 @@ class StockScreen extends StatefulWidget {
   State<StockScreen> createState() => _StockScreenState();
 }
 
-class _StockScreenState extends State<StockScreen> {
+class _StockScreenState extends State<StockScreen> with SingleTickerProviderStateMixin {
+  late TabController _tabController;
+
   @override
   void initState() {
     super.initState();
-    _loadData();
+    _tabController = TabController(length: 2, vsync: this);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadData());
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadData() async {
     final authVM = Provider.of<AuthViewModel>(context, listen: false);
     final stockVM = Provider.of<StockViewModel>(context, listen: false);
     
-    if (authVM.currentUser?.assignedCarId != null) {
-        stockVM.loadStock(authVM.currentUser!.assignedCarId!);
+    if (authVM.currentUser?.assignedLocationId != null) {
+      stockVM.loadStock(authVM.currentUser!.assignedLocationId!);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final stockVM = Provider.of<StockViewModel>(context);
-    final authVM = Provider.of<AuthViewModel>(context);
-
     return Scaffold(
-      appBar: AppBar(title: const Text('Current Stock')),
-      body: _buildBody(authVM, stockVM),
+      appBar: AppBar(
+        title: const Text('Stock Management'),
+        bottom: TabBar(
+          controller: _tabController,
+          tabs: const [
+            Tab(icon: Icon(Icons.inventory)), 
+            Tab(icon: Icon(Icons.history)),
+        ],
+        ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: _loadData,
+          ),
+        ],
+      ),
+      body: Consumer2<AuthViewModel, StockViewModel>(
+        builder: (context, authVM, stockVM, _) {
+          if (authVM.currentUser == null) {
+            return const Center(child: Text('Please log in'));
+          }
+
+          if (authVM.currentUser!.assignedLocationId == null) {
+            return _buildNoLocationAssigned(authVM);
+          }
+
+          return TabBarView(
+            controller: _tabController,
+            children: [
+              _buildCurrentStockTab(stockVM, authVM),
+              _buildStockHistoryTab(authVM),
+            ],
+          );
+        },
+      ),
     );
   }
 
-  Widget _buildBody(AuthViewModel authVM, StockViewModel stockVM) {
-    // No user logged in
-    if (authVM.currentUser == null) {
-      return const Center(child: Text('Please log in'));
-    }
-
-    // No car assigned
-    if (authVM.currentUser!.assignedCarId == null) {
-      return Column(
+  Widget _buildNoLocationAssigned(AuthViewModel authVM) {
+    return Center(
+      child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Text('No car assigned to you'),
-          const SizedBox(height: 20),
+          const Icon(Icons.location_off, size: 64, color: Colors.grey),
+          const SizedBox(height: 16),
+          const Text('No location assigned'),
+          const SizedBox(height: 8),
+          Text(
+            'Contact your administrator to assign a location',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          const SizedBox(height: 16),
           ElevatedButton(
-            onPressed: _loadData,
+            onPressed:_loadData,
             child: const Text('Refresh'),
           ),
-          const SizedBox(height: 20),
-          Text(
-            'Please contact your administrator to assign a vehicle',
-            style: Theme.of(context).textTheme.bodySmall,
-            textAlign: TextAlign.center,
-          ),
         ],
-      );
-    }
+      ),
+    );
+  }
 
-    // Loading state
+  Widget _buildCurrentStockTab(StockViewModel stockVM, AuthViewModel authVM) {
     if (stockVM.isLoading) {
       return const Center(child: CircularProgressIndicator());
     }
 
-    // Empty stock
     if (stockVM.stock.isEmpty) {
-      return Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Text('No stock available for your assigned vehicle'),
-          const SizedBox(height: 20),
-          ElevatedButton(
-            onPressed: _loadData,
-            child: const Text('Refresh'),
-          ),
-        ],
+      return FutureBuilder<DocumentSnapshot>(
+        future: FirebaseFirestore.instance
+            .collection('locations')
+            .doc(authVM.currentUser!.assignedLocationId)
+            .get(),
+        builder: (context, snapshot) {
+          if (!snapshot.hasData) {
+            return const Center(child: CircularProgressIndicator());
+          }
+
+          final location = snapshot.data!.data() as Map<String, dynamic>? ?? {};
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.inventory_2, size: 64, color: Colors.grey),
+                const SizedBox(height: 16),
+                Text(
+                  'No stock available at ${location['name']}',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 8),
+                const Text('Scan products to add stock'),
+                const SizedBox(height: 16),
+                ElevatedButton(
+                  onPressed: _loadData,
+                  child: const Text('Refresh'),
+                ),
+              ],
+            ),
+          );
+        },
       );
     }
 
-    // Show stock list
     return RefreshIndicator(
       onRefresh: _loadData,
       child: ListView.builder(
         itemCount: stockVM.stock.keys.length,
         itemBuilder: (context, index) {
           final productId = stockVM.stock.keys.elementAt(index);
+          final quantity = stockVM.stock[productId] ?? 0;
+
           return FutureBuilder<DocumentSnapshot>(
             future: FirebaseFirestore.instance
                 .collection('products')
                 .doc(productId)
                 .get(),
             builder: (context, snapshot) {
-              if (!snapshot.hasData) {
-                return const ListTile(title: Text('Loading product...'));
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const ListTile(
+                  leading: CircularProgressIndicator(),
+                  title: Text('Loading product...'),
+                );
               }
+
+              if (!snapshot.hasData || !snapshot.data!.exists) {
+                return ListTile(
+                  leading: const Icon(Icons.error),
+                  title: Text('Product ID: $productId'),
+                  subtitle: const Text('Not found in database'),
+                );
+              }
+
               final product = Product.fromFirestore(snapshot.data!);
-              return ListTile(
-                title: Text(product.name),
-                subtitle: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Quantity: ${stockVM.stock[productId]}'),
-                    if (product.barcode.isNotEmpty)
-                      Text('Barcode: ${product.barcode}',
-                        style: Theme.of(context).textTheme.bodySmall),
-                  ],
-                ),
-                trailing: Text('${product.price.toStringAsFixed(2)} €',
-                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    color: Theme.of(context).primaryColor,
+              return Card(
+                margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                child: ListTile(
+                  leading: product.imageUrl != null
+                      ? Image.network(product.imageUrl!, width: 50, height: 50)
+                      : const Icon(Icons.shopping_bag),
+                  title: Text(product.name),
+                  subtitle: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Quantity: $quantity'),
+                      if (product.barcode.isNotEmpty)
+                        Text('Barcode: ${product.barcode}'),
+                    ],
+                  ),
+                  trailing: Text(
+                    '€${product.price.toStringAsFixed(2)}',
+                    style: const TextStyle(fontWeight: FontWeight.bold),
                   ),
                 ),
               );
@@ -2605,6 +4476,555 @@ class _StockScreenState extends State<StockScreen> {
           );
         },
       ),
+    );
+  }
+
+  Widget _buildStockHistoryTab(AuthViewModel authVM) {
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('stockHistory')
+          .where('locationId', isEqualTo: authVM.currentUser!.assignedLocationId)
+          .orderBy('timestamp', descending: true)
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+
+        if (snapshot.hasError) {
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.error, size: 64, color: Colors.red),
+                const SizedBox(height: 16),
+                const Text('Error loading stock history'),
+                Text(
+                  snapshot.error.toString(),
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                const SizedBox(height: 16),
+                ElevatedButton(
+                  onPressed: _loadData,
+                  child: const Text('Retry'),
+                ),
+              ],
+            ),
+          );
+        }
+
+        if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+          return FutureBuilder<DocumentSnapshot>(
+            future: FirebaseFirestore.instance
+                .collection('locations')
+                .doc(authVM.currentUser!.assignedLocationId)
+                .get(),
+            builder: (context, locationSnapshot) {
+              if (!locationSnapshot.hasData) {
+                return const Center(child: CircularProgressIndicator());
+              }
+
+              final location = locationSnapshot.data!.data() as Map<String, dynamic>? ?? {};
+              return Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(Icons.history, size: 64, color: Colors.grey),
+                    const SizedBox(height: 16),
+                    Text(
+                      'No stock history at ${location['name']}',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    const SizedBox(height: 8),
+                    const Text('Stock changes will appear here'),
+                  ],
+                ),
+              );
+            },
+          );
+        }
+
+        return ListView.builder(
+          itemCount: snapshot.data!.docs.length,
+          itemBuilder: (context, index) {
+            final doc = snapshot.data!.docs[index];
+            final data = doc.data() as Map<String, dynamic>;
+            final timestamp = (data['timestamp'] as Timestamp).toDate();
+
+            return FutureBuilder(
+              future: Future.wait([
+                FirebaseFirestore.instance
+                    .collection('products')
+                    .doc(data['productId'])
+                    .get(),
+                FirebaseFirestore.instance
+                    .collection('users')
+                    .doc(data['adminId'])
+                    .get(),
+              ]),
+              builder: (context, AsyncSnapshot<List<DocumentSnapshot>> snap) {
+                if (snap.connectionState == ConnectionState.waiting) {
+                  return const ListTile(
+                    leading: CircularProgressIndicator(),
+                    title: Text('Loading history details...'),
+                  );
+                }
+
+                final product = snap.data?[0].exists ?? false
+                    ? Product.fromFirestore(snap.data![0])
+                    : null;
+                final admin = snap.data?[1].exists ?? false
+                    ? snap.data![1].data() as Map<String, dynamic>
+                    : null;
+
+                return Card(
+                  margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  child: ListTile(
+                    leading: FutureBuilder<DocumentSnapshot>(
+                      future: FirebaseFirestore.instance
+                          .collection('products')
+                          .doc(data['productId'])
+                          .get(),
+                      builder: (context, productSnapshot) {
+                        if (productSnapshot.connectionState == ConnectionState.waiting) {
+                          return const SizedBox(
+                            width: 50,
+                            height: 50,
+                            child: CircularProgressIndicator(),
+                          );
+                        }
+                        
+                        if (!productSnapshot.hasData || !productSnapshot.data!.exists) {
+                          return const Icon(Icons.error, color: Colors.red);
+                        }
+
+                        final product = Product.fromFirestore(productSnapshot.data!);
+                        return product.imageUrl != null
+                            ? Image.network(product.imageUrl!, width: 50, height: 50)
+                            : const Icon(Icons.shopping_bag);
+                      },
+                    ),
+                    title: FutureBuilder<DocumentSnapshot>(
+                      future: FirebaseFirestore.instance
+                          .collection('products')
+                          .doc(data['productId'])
+                          .get(),
+                      builder: (context, productSnapshot) {
+                        if (productSnapshot.connectionState == ConnectionState.waiting) {
+                          return const Text('Loading product...');
+                        }
+                        
+                        if (!productSnapshot.hasData || !productSnapshot.data!.exists) {
+                          return Text('Product ID: ${data['productId']}');
+                        }
+
+                        final product = Product.fromFirestore(productSnapshot.data!);
+                        return Text(product.name);
+                      },
+                    ),
+                    subtitle: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Quantity: ${data['quantity']}'),
+                        if (admin != null)
+                          Text('Updated by: ${admin['email']}'),
+                        Text(
+                          DateFormat('MMM dd, yyyy - HH:mm').format(timestamp),
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ],
+                    ),
+                    trailing: Icon(
+                      (data['quantity'] as int) > 0 ? Icons.add : Icons.remove,
+                      color: (data['quantity'] as int) > 0 ? Colors.green : Colors.red,
+                    ),
+                  ),
+                );
+              },
+            );
+          },
+        );
+      },
+    );
+  }
+}
+
+views\agent\stock_screen.dart:
+
+# views\agent\stock_screen.dart
+import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:provider/provider.dart';
+import 'package:intl/intl.dart';
+import '../../viewmodels/stock_vm.dart';
+import '../../models/product.dart';
+import '../../viewmodels/auth_vm.dart';
+
+class StockScreen extends StatefulWidget {
+  const StockScreen({super.key});
+
+  @override
+  State<StockScreen> createState() => _StockScreenState();
+}
+
+class _StockScreenState extends State<StockScreen> with SingleTickerProviderStateMixin {
+  late TabController _tabController;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 2, vsync: this);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadData());
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadData() async {
+    final authVM = Provider.of<AuthViewModel>(context, listen: false);
+    final stockVM = Provider.of<StockViewModel>(context, listen: false);
+    
+    if (authVM.currentUser?.assignedLocationId != null) {
+      stockVM.loadStock(authVM.currentUser!.assignedLocationId!);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Stock Management'),
+        bottom: TabBar(
+          controller: _tabController,
+          tabs: const [
+            Tab(icon: Icon(Icons.inventory)), 
+            Tab(icon: Icon(Icons.history)),
+        ],
+        ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: _loadData,
+          ),
+        ],
+      ),
+      body: Consumer2<AuthViewModel, StockViewModel>(
+        builder: (context, authVM, stockVM, _) {
+          if (authVM.currentUser == null) {
+            return const Center(child: Text('Please log in'));
+          }
+
+          if (authVM.currentUser!.assignedLocationId == null) {
+            return _buildNoLocationAssigned(authVM);
+          }
+
+          return TabBarView(
+            controller: _tabController,
+            children: [
+              _buildCurrentStockTab(stockVM, authVM),
+              _buildStockHistoryTab(authVM),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildNoLocationAssigned(AuthViewModel authVM) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(Icons.location_off, size: 64, color: Colors.grey),
+          const SizedBox(height: 16),
+          const Text('No location assigned'),
+          const SizedBox(height: 8),
+          Text(
+            'Contact your administrator to assign a location',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          const SizedBox(height: 16),
+          ElevatedButton(
+            onPressed:_loadData,
+            child: const Text('Refresh'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCurrentStockTab(StockViewModel stockVM, AuthViewModel authVM) {
+    if (stockVM.isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    final adjustedStock = stockVM.adjustedStock;
+
+    if (adjustedStock.isEmpty) {
+      return FutureBuilder<DocumentSnapshot>(
+        future: FirebaseFirestore.instance
+            .collection('locations')
+            .doc(authVM.currentUser!.assignedLocationId)
+            .get(),
+        builder: (context, snapshot) {
+          if (!snapshot.hasData) {
+            return const Center(child: CircularProgressIndicator());
+          }
+
+          final location = snapshot.data!.data() as Map<String, dynamic>? ?? {};
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.inventory_2, size: 64, color: Colors.grey),
+                const SizedBox(height: 16),
+                Text(
+                  'No stock available at ${location['name']}',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 8),
+                const Text('Scan products to add stock'),
+                const SizedBox(height: 16),
+                ElevatedButton(
+                  onPressed: () => stockVM.loadStock(authVM.currentUser!.assignedLocationId!),
+                  child: const Text('Refresh'),
+                ),
+              ],
+            ),
+          );
+        },
+      );
+    }
+
+    return RefreshIndicator(
+      onRefresh: () async => stockVM.loadStock(authVM.currentUser!.assignedLocationId!),
+      child: ListView.builder(
+        itemCount: adjustedStock.keys.length,
+        itemBuilder: (context, index) {
+          final productId = adjustedStock.keys.elementAt(index);
+          final quantity = adjustedStock[productId] ?? 0;
+
+          return FutureBuilder<DocumentSnapshot>(
+            future: FirebaseFirestore.instance
+                .collection('products')
+                .doc(productId)
+                .get(),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const ListTile(
+                  leading: CircularProgressIndicator(),
+                  title: Text('Loading product...'),
+                );
+              }
+
+              if (!snapshot.hasData || !snapshot.data!.exists) {
+                return ListTile(
+                  leading: const Icon(Icons.error),
+                  title: Text('Product ID: $productId'),
+                  subtitle: const Text('Not found in database'),
+                );
+              }
+
+              final product = Product.fromFirestore(snapshot.data!);
+              return Card(
+                margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                child: ListTile(
+                  leading: product.imageUrl != null
+                      ? Image.network(product.imageUrl!, width: 50, height: 50)
+                      : const Icon(Icons.shopping_bag),
+                  title: Text(product.name),
+                  subtitle: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Available: $quantity'),
+                      Text('Initial stock: ${stockVM.stock[productId] ?? 0}'),
+                      Text('Sold this month: ${stockVM.monthlySales[productId] ?? 0}'),
+                      if (product.barcode.isNotEmpty)
+                        Text('Barcode: ${product.barcode}'),
+                    ],
+                  ),
+                  trailing: Text(
+                    '€${product.price.toStringAsFixed(2)}',
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                ),
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildStockHistoryTab(AuthViewModel authVM) {
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('stockHistory')
+          .where('locationId', isEqualTo: authVM.currentUser!.assignedLocationId)
+          .orderBy('timestamp', descending: true)
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+
+        if (snapshot.hasError) {
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.error, size: 64, color: Colors.red),
+                const SizedBox(height: 16),
+                const Text('Error loading stock history'),
+                Text(
+                  snapshot.error.toString(),
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                const SizedBox(height: 16),
+                ElevatedButton(
+                  onPressed: _loadData,
+                  child: const Text('Retry'),
+                ),
+              ],
+            ),
+          );
+        }
+
+        if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+          return FutureBuilder<DocumentSnapshot>(
+            future: FirebaseFirestore.instance
+                .collection('locations')
+                .doc(authVM.currentUser!.assignedLocationId)
+                .get(),
+            builder: (context, locationSnapshot) {
+              if (!locationSnapshot.hasData) {
+                return const Center(child: CircularProgressIndicator());
+              }
+
+              final location = locationSnapshot.data!.data() as Map<String, dynamic>? ?? {};
+              return Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(Icons.history, size: 64, color: Colors.grey),
+                    const SizedBox(height: 16),
+                    Text(
+                      'No stock history at ${location['name']}',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    const SizedBox(height: 8),
+                    const Text('Stock changes will appear here'),
+                  ],
+                ),
+              );
+            },
+          );
+        }
+
+        return ListView.builder(
+          itemCount: snapshot.data!.docs.length,
+          itemBuilder: (context, index) {
+            final doc = snapshot.data!.docs[index];
+            final data = doc.data() as Map<String, dynamic>;
+            final timestamp = (data['timestamp'] as Timestamp).toDate();
+
+            return FutureBuilder(
+              future: Future.wait([
+                FirebaseFirestore.instance
+                    .collection('products')
+                    .doc(data['productId'])
+                    .get(),
+                FirebaseFirestore.instance
+                    .collection('users')
+                    .doc(data['adminId'])
+                    .get(),
+              ]),
+              builder: (context, AsyncSnapshot<List<DocumentSnapshot>> snap) {
+                if (snap.connectionState == ConnectionState.waiting) {
+                  return const ListTile(
+                    leading: CircularProgressIndicator(),
+                    title: Text('Loading history details...'),
+                  );
+                }
+
+                final product = snap.data?[0].exists ?? false
+                    ? Product.fromFirestore(snap.data![0])
+                    : null;
+                final admin = snap.data?[1].exists ?? false
+                    ? snap.data![1].data() as Map<String, dynamic>
+                    : null;
+
+                return Card(
+                  margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  child: ListTile(
+                    leading: FutureBuilder<DocumentSnapshot>(
+                      future: FirebaseFirestore.instance
+                          .collection('products')
+                          .doc(data['productId'])
+                          .get(),
+                      builder: (context, productSnapshot) {
+                        if (productSnapshot.connectionState == ConnectionState.waiting) {
+                          return const SizedBox(
+                            width: 50,
+                            height: 50,
+                            child: CircularProgressIndicator(),
+                          );
+                        }
+                        
+                        if (!productSnapshot.hasData || !productSnapshot.data!.exists) {
+                          return const Icon(Icons.error, color: Colors.red);
+                        }
+
+                        final product = Product.fromFirestore(productSnapshot.data!);
+                        return product.imageUrl != null
+                            ? Image.network(product.imageUrl!, width: 50, height: 50)
+                            : const Icon(Icons.shopping_bag);
+                      },
+                    ),
+                    title: FutureBuilder<DocumentSnapshot>(
+                      future: FirebaseFirestore.instance
+                          .collection('products')
+                          .doc(data['productId'])
+                          .get(),
+                      builder: (context, productSnapshot) {
+                        if (productSnapshot.connectionState == ConnectionState.waiting) {
+                          return const Text('Loading product...');
+                        }
+                        
+                        if (!productSnapshot.hasData || !productSnapshot.data!.exists) {
+                          return Text('Product ID: ${data['productId']}');
+                        }
+
+                        final product = Product.fromFirestore(productSnapshot.data!);
+                        return Text(product.name);
+                      },
+                    ),
+                    subtitle: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Quantity: ${data['quantity']}'),
+                        if (admin != null)
+                          Text('Updated by: ${admin['email']}'),
+                        Text(
+                          DateFormat('MMM dd, yyyy - HH:mm').format(timestamp),
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ],
+                    ),
+                    trailing: Icon(
+                      (data['quantity'] as int) > 0 ? Icons.add : Icons.remove,
+                      color: (data['quantity'] as int) > 0 ? Colors.green : Colors.red,
+                    ),
+                  ),
+                );
+              },
+            );
+          },
+        );
+      },
     );
   }
 }
@@ -2771,7 +5191,7 @@ class _PaymentSectionState extends State<PaymentSection> {
                           )
                         : const Text(
                             'Confirm Sale',
-                            style: TextStyle(fontSize: 16),
+                            style: TextStyle(fontSize: 16, color: Colors.white),
                           ),
                   ),
                 ],
@@ -2808,14 +5228,16 @@ class _PaymentSectionState extends State<PaymentSection> {
 widgets\product_details_card.dart:
 
 # widgets\product_details_card.dart
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../models/product.dart';
 import '../models/discount.dart';
 import 'discount_badge.dart';
 import '../viewmodels/discount_vm.dart';
-import 'package:provider/provider.dart';
+import '../viewmodels/sales_vm.dart';
 
-class ProductDetailsCard extends StatelessWidget {
+class ProductDetailsCard extends StatefulWidget {
   final Product product;
   final VoidCallback? onRemove;
 
@@ -2825,28 +5247,30 @@ class ProductDetailsCard extends StatelessWidget {
     this.onRemove,
   });
 
-  double _calculateFinalPrice(double basePrice, List<Discount> discounts) {
-    if (discounts.isEmpty) return basePrice;
-    
-    // Get the highest applicable discount
-    final applicableDiscounts = discounts.where((d) => d.category == product.category).toList();
-    if (applicableDiscounts.isEmpty) return basePrice;
+  @override
+  State<ProductDetailsCard> createState() => _ProductDetailsCardState();
+}
 
-    final maxDiscount = applicableDiscounts
-      .map((d) => d.type == '%' ? basePrice * (d.value / 100) : d.value)
-      .reduce((a, b) => a > b ? a : b);
-
-    return basePrice - maxDiscount;
-  }
+class _ProductDetailsCardState extends State<ProductDetailsCard> {
+  Discount? _selectedDiscount;
 
   @override
   Widget build(BuildContext context) {
     final discountVM = Provider.of<DiscountViewModel>(context);
+    final salesVM = Provider.of<SalesViewModel>(context);
 
-    final finalPrice = _calculateFinalPrice(
-      product.price,
-      discountVM.activeDiscounts,
-    );
+    // Get applicable discounts for this product's category
+    final applicableDiscounts = discountVM.activeDiscounts
+        .where((d) => d.categoryRef.path == widget.product.categoryRef.path)
+        .toList();
+
+    // Get the initially selected discount (if any)
+    _selectedDiscount ??= salesVM.getSelectedDiscountForProduct(widget.product.id);
+
+    // Calculate final price based on selected discount
+    final finalPrice = _selectedDiscount != null
+        ? _calculatePriceWithDiscount(widget.product.price, _selectedDiscount!)
+        : widget.product.price;
 
     return Card(
       margin: const EdgeInsets.all(12),
@@ -2855,57 +5279,153 @@ class ProductDetailsCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // Product header row with image and name
             Row(
               children: [
                 // Product Image
-                if (product.imageUrl != null)
-                  Image.network(
-                    product.imageUrl!,
-                    width: 80,
-                    height: 80,
-                    fit: BoxFit.cover,
+                if (widget.product.imageUrl != null)
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: Image.network(
+                      widget.product.imageUrl!,
+                      width: 80,
+                      height: 80,
+                      fit: BoxFit.cover,
+                    ),
                   ),
-                if (product.imageUrl == null || product.imageUrl!.isEmpty)
+                if (widget.product.imageUrl == null || widget.product.imageUrl!.isEmpty)
                   Container(
                     width: 80,
                     height: 80,
-                    color: Colors.grey[200],
+                    decoration: BoxDecoration(
+                      color: Colors.grey[200],
+                      borderRadius: BorderRadius.circular(8),
+                    ),
                     child: const Icon(Icons.image_not_supported, color: Colors.grey),
                   ),
                 const SizedBox(width: 16),
+                
                 // Product Info
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        product.name,
-                        style: Theme.of(context).textTheme.titleLarge,
+                        widget.product.name,
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
                       ),
                       const SizedBox(height: 4),
-                      Text(
-                        product.category,
-                        style: Theme.of(context).textTheme.bodySmall,
+                      FutureBuilder<DocumentSnapshot>(
+                        future: widget.product.categoryRef.get(),
+                        builder: (context, snapshot) {
+                          if (snapshot.connectionState == ConnectionState.waiting) {
+                            return Text(
+                              'Loading category...',
+                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                color: Colors.grey[600],
+                              ),
+                            );
+                          }
+                          if (snapshot.hasError) {
+                            return Text(
+                              'Category: Error',
+                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                color: Colors.grey[600],
+                              ),
+                            );
+                          }
+                          final categoryName = snapshot.data?.get('name') ?? 'Uncategorized';
+                          return Text(
+                            'Category: $categoryName',
+                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: Colors.grey[600],
+                            ),
+                          );
+                        },
                       ),
+                      if (widget.product.barcode.isNotEmpty)
+                        Text(
+                          'Barcode: ${widget.product.barcode}',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
                     ],
                   ),
                 ),
+                
                 // Remove Button (only shown if onRemove callback is provided)
-                if (onRemove != null)
+                if (widget.onRemove != null)
                   IconButton(
                     icon: const Icon(Icons.delete, color: Colors.red),
-                    onPressed: onRemove,
+                    onPressed: widget.onRemove,
                   ),
               ],
             ),
-            const Divider(),
+            
+            const Divider(height: 24, thickness: 1),
+            
+            // Discount Selection
+            if (applicableDiscounts.isNotEmpty) ...[
+              Text(
+                'Available Discounts:',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                decoration: BoxDecoration(
+                  border: Border.all(color: Colors.grey[300]!),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: DropdownButton<Discount>(
+                  isExpanded: true,
+                  value: _selectedDiscount,
+                  hint: const Text('Select discount...'),
+                  underline: const SizedBox(), // Remove default underline
+                  items: [
+                    const DropdownMenuItem<Discount>(
+                      value: null,
+                      child: Text('No discount'),
+                    ),
+                    ...applicableDiscounts.map((discount) {
+                      return DropdownMenuItem<Discount>(
+                        value: discount,
+                        child: Text(
+                          '${discount.value}${discount.type} discount',
+                          style: TextStyle(
+                            color: _selectedDiscount == discount 
+                                ? Theme.of(context).primaryColor 
+                                : null,
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ],
+                  onChanged: (Discount? selected) {
+                    setState(() {
+                      _selectedDiscount = selected;
+                    });
+                    salesVM.selectDiscountForProduct(widget.product.id, selected);
+                  },
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
+            
             // Price Information
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(
                   'Final Price:',
-                  style: Theme.of(context).textTheme.bodyLarge,
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
                 Text(
                   '€${finalPrice.toStringAsFixed(2)}',
@@ -2917,11 +5437,13 @@ class ProductDetailsCard extends StatelessWidget {
                 ),
               ],
             ),
-            if (finalPrice < product.price)
+            
+            // Original price if discounted
+            if (_selectedDiscount != null)
               Padding(
-                padding: const EdgeInsets.only(top: 8),
+                padding: const EdgeInsets.only(top: 4),
                 child: Text(
-                  'Original Price: €${product.price.toStringAsFixed(2)}',
+                  'Original: €${widget.product.price.toStringAsFixed(2)}',
                   style: TextStyle(
                     fontSize: 14,
                     color: Colors.grey[600],
@@ -2929,19 +5451,22 @@ class ProductDetailsCard extends StatelessWidget {
                   ),
                 ),
               ),
-            const SizedBox(height: 12),
-            // Discount Badges
-            Wrap(
-              spacing: 8,
-              children: discountVM.activeDiscounts
-                  .where((d) => d.category == product.category)
-                  .map((discount) => DiscountBadge(discount: discount))
-                  .toList(),
-            ),
+            
+            // Discount details if applied
+            if (_selectedDiscount != null) ...[
+              const SizedBox(height: 12),
+              DiscountBadge(discount: _selectedDiscount!),
+            ],
           ],
         ),
       ),
     );
+  }
+
+  double _calculatePriceWithDiscount(double basePrice, Discount discount) {
+    return discount.type == '%' 
+        ? basePrice * (1 - discount.value / 100)
+        : basePrice - discount.value;
   }
 }
 

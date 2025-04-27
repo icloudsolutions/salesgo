@@ -19,6 +19,7 @@ class _SalesScreenState extends State<SalesScreen> {
   final FirestoreService _firestoreService = FirestoreService();
   bool _isScanning = true;
   bool _isProcessingPayment = false;
+  bool _hasScanned = false; // New flag to track if we've scanned a product
 
   @override
   void dispose() {
@@ -33,7 +34,7 @@ class _SalesScreenState extends State<SalesScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('New Sale'),
+        title: const Text('Quick Sale'),
         actions: [
           IconButton(
             icon: Icon(_isScanning ? Icons.no_photography : Icons.qr_code_scanner),
@@ -51,7 +52,15 @@ class _SalesScreenState extends State<SalesScreen> {
                   itemCount: salesVM.cartItems.length,
                   itemBuilder: (context, index) => ProductDetailsCard(
                     product: salesVM.cartItems[index],
-                    onRemove: () => salesVM.removeFromCart(index),
+                    onRemove: () {
+                      salesVM.removeFromCart(index);
+                      // Reset scan state when product is removed
+                      if (salesVM.cartItems.isEmpty) {
+                        setState(() {
+                          _hasScanned = false;
+                        });
+                      }
+                    },
                   ),
                 ),
               ),
@@ -87,7 +96,11 @@ class _SalesScreenState extends State<SalesScreen> {
       ),
       child: MobileScanner(
         controller: _scannerController,
-        onDetect: (capture) => _handleBarcodeScan(capture, context, salesVM),
+        onDetect: (capture) {
+          if (!_hasScanned) { // Only scan if we haven't already scanned a product
+            _handleBarcodeScan(capture, context, salesVM);
+          }
+        },
       ),
     );
   }
@@ -97,10 +110,16 @@ class _SalesScreenState extends State<SalesScreen> {
     BuildContext context,
     SalesViewModel salesVM,
   ) async {
-    if (capture.barcodes.isEmpty) return;
-    
+    if (capture.barcodes.isEmpty || _hasScanned) return; // Prevent multiple scans
+
     final barcode = capture.barcodes.first.rawValue;
     if (barcode == null) return;
+
+    setState(() {
+      _hasScanned = true; // Ensure scanning stops
+      _isScanning = false;
+    });
+    _scannerController.stop(); // Stop scanning immediately
 
     try {
       final product = await _firestoreService.getProductByBarcode(barcode);
@@ -108,24 +127,32 @@ class _SalesScreenState extends State<SalesScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Product not found')),
         );
+        setState(() => _hasScanned = false); // Allow scanning again if product is not found
         return;
       }
+
       salesVM.addToCart(product);
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error: ${e.toString()}')),
       );
+      setState(() => _hasScanned = false); // Allow re-scanning in case of error
     }
   }
 
+
   void _toggleScanning() {
-    setState(() => _isScanning = !_isScanning);
-    if (_isScanning) {
-      _scannerController.start();
-    } else {
-      _scannerController.stop();
-    }
+    setState(() {
+      _isScanning = !_isScanning;
+      if (_isScanning) {
+        _hasScanned = false; // Reset scanning state when re-enabling scanner
+        _scannerController.start();
+      } else {
+        _scannerController.stop();
+      }
+    });
   }
+
 
   Future<void> _handleSaleConfirmation(
     BuildContext context,
@@ -148,6 +175,7 @@ class _SalesScreenState extends State<SalesScreen> {
         paymentMethod: paymentMethod,
         couponCode: couponCode,
         agentId: authVM.currentUser!.uid,
+        locationId: authVM.currentUser!.assignedLocationId!, 
       );
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -155,11 +183,12 @@ class _SalesScreenState extends State<SalesScreen> {
       );
 
       // Reset the screen after successful payment
-      _scannerController.start();
       setState(() {
         _isScanning = true;
         _isProcessingPayment = false;
+        _hasScanned = false;
       });
+      _scannerController.start();
       
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -171,4 +200,5 @@ class _SalesScreenState extends State<SalesScreen> {
       }
     }
   }
+
 }

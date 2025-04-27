@@ -4,6 +4,7 @@ import 'package:salesgo/models/product.dart';
 class Sale {
   final String id;
   final String agentId;
+  final String locationId;
   final DateTime date;
   final List<Product> products;
   final double totalAmount;
@@ -13,6 +14,7 @@ class Sale {
   Sale({
     required this.id,
     required this.agentId,
+    required this.locationId,
     required this.date,
     required this.products,
     required this.totalAmount,
@@ -24,6 +26,7 @@ class Sale {
   Map<String, dynamic> toMap() => {
     'id': id,
     'agentId': agentId,
+    'locationId': locationId,
     'date': date,
     'products': products.map((p) => p.toMap()).toList(),
     'totalAmount': totalAmount,
@@ -37,9 +40,10 @@ class Sale {
     return Sale(
       id: doc.id,
       agentId: data['agentId'] as String? ?? '',
+      locationId: data['locationId'] ?? '',
       date: (data['date'] as Timestamp?)?.toDate() ?? DateTime.now(),
       products: (data['products'] as List?)?.map((p) => 
-        Product.fromMap(p as Map<String, dynamic>)).toList() ?? [],
+        Product.fromMap(p as Map<String, dynamic>, p['id'] as String? ?? '')).toList() ?? [],
       totalAmount: (data['totalAmount'] as num?)?.toDouble() ?? 0.0,
       paymentMethod: data['paymentMethod'] as String? ?? '',
       couponCode: data['couponCode'] as String?,
@@ -48,7 +52,7 @@ class Sale {
 
   static List<Product> _parseProducts(dynamic productsData) {
     if (productsData is! List) return [];
-    return productsData.map((p) => Product.fromMap(p as Map<String, dynamic>)).toList();
+    return productsData.map((p) => Product.fromMap(p as Map<String, dynamic>, p['id'] as String? ?? '')).toList();
   }
 
 }

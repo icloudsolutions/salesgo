@@ -2,38 +2,70 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 
 class Discount {
   final String id;
-  final String category;
-  final DateTime startDate;
-  final DateTime endDate;
+  final DocumentReference categoryRef;
+  final DateTime? startDate;
+  final DateTime? endDate;
   final double value;
   final String type;
+  final bool hasDateRange;
+  final String name;
+  final DocumentReference? reference;
 
   Discount({
     required this.id,
-    required this.category,
-    required this.startDate,
-    required this.endDate,
+    required this.categoryRef,
+    this.startDate,
+    this.endDate,
     required this.value,
+    required this.hasDateRange,
     required this.type,
+    required this.name,
+    this.reference,
   });
 
-  factory Discount.fromFirestore(Map<String, dynamic> data) {
-    return Discount(
-      id: data['id'] as String? ?? '', // Provide empty string as default
-      category: data['category'] as String? ?? 'general', // Default category
-      startDate: (data['startDate'] as Timestamp?)?.toDate() ?? DateTime.now(),
-      endDate: (data['endDate'] as Timestamp?)?.toDate() ?? DateTime.now().add(const Duration(days: 30)),
-      value: (data['value'] as num?)?.toDouble() ?? 0.0,
-      type: data['type'] as String? ?? 'percentage', // Default to percentage
-    );
+  factory Discount.fromFirestore(DocumentSnapshot doc) {
+    try {
+      final data = doc.data() as Map<String, dynamic>;
+      
+      return Discount(
+        id: doc.id,
+        categoryRef: data['categoryRef'] as DocumentReference,
+        startDate: data['hasDateRange'] ? (data['startDate'] as Timestamp).toDate() : null,
+        endDate: data['hasDateRange'] ? (data['endDate'] as Timestamp).toDate() : null,
+        value: (data['value'] as num).toDouble(),
+        type: data['type'] as String,
+        hasDateRange: data['hasDateRange'] as bool? ?? false,
+        name: data['name'] as String? ?? '',
+        reference: doc.reference,
+      );
+    } catch (e) {
+      throw FormatException('Failed to parse Discount: $e');
+    }
   }
 
-  Map<String, dynamic> toMap() => {
-    'id': id,
-    'category': category,
-    'startDate': startDate,
-    'endDate': endDate,
-    'value': value,
-    'type': type,
-  };
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'categoryRef': categoryRef,
+      if (hasDateRange && startDate != null) 'startDate': Timestamp.fromDate(startDate!),
+      if (hasDateRange && endDate != null) 'endDate': Timestamp.fromDate(endDate!),
+      'value': value,
+      'type': type,
+      'hasDateRange': hasDateRange,
+      'name': name,
+    };
+  }
+
+  bool get isActive {
+    if (!hasDateRange) return true;
+    if (startDate == null || endDate == null) return false;
+    final now = DateTime.now();
+    return now.isAfter(startDate!) && now.isBefore(endDate!);
+  }
+
+  @override
+  String toString() {
+    return 'Discount(id: $id, name: $name, value: $value$type, '
+           'active: ${hasDateRange ? '${startDate?.toIso8601String()} to ${endDate?.toIso8601String()}' : 'Always active'})';
+  }
 }

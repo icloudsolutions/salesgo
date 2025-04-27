@@ -26,9 +26,9 @@ class _AgentHomeScreenState extends State<AgentHomeScreen> {
       final discountVM = context.read<DiscountViewModel>();
       final authVM = context.read<AuthViewModel>();
       
-      // Load stock for the assigned car (if any)
-      if (authVM.currentUser?.assignedCarId != null) {
-        stockVM.loadStock(authVM.currentUser!.assignedCarId!);
+      // Load stock for the assigned location (if any)
+      if (authVM.currentUser?.assignedLocationId != null) {
+        stockVM.loadStock(authVM.currentUser!.assignedLocationId!);
       }
       
       // Load active discounts
@@ -46,10 +46,24 @@ class _AgentHomeScreenState extends State<AgentHomeScreen> {
     setState(() => _selectedIndex = index);
   }
 
+  void _logout(BuildContext context) async {
+    final authVM = Provider.of<AuthViewModel>(context, listen: false);
+    await authVM.signOut();
+    Navigator.pushReplacementNamed(context, '/');
+  }
+  
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Tableau de bord Agent')),
+      appBar: AppBar(
+        title: const Text('Coach Mobile Dashboard'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.logout),
+            onPressed: () => _logout(context),
+          ),
+        ],
+      ),
       body: _agentScreens.elementAt(_selectedIndex),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _selectedIndex,
@@ -57,7 +71,7 @@ class _AgentHomeScreenState extends State<AgentHomeScreen> {
         items: const [
           BottomNavigationBarItem(
             icon: Icon(Icons.point_of_sale),
-            label: 'Ventes',
+            label: 'Sales',
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.inventory_2),
@@ -65,7 +79,7 @@ class _AgentHomeScreenState extends State<AgentHomeScreen> {
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.history),
-            label: 'Historique',
+            label: 'History',
           ),
         ],
       ),
