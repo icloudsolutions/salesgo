@@ -9,7 +9,6 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'dart:io';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:file_picker/file_picker.dart';
 
 class ReportsScreen extends StatefulWidget {
   const ReportsScreen({super.key});
@@ -29,7 +28,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
   List<String> _allAgents = [];
   List<String> _selectedAgents = [];
   bool _selectAllAgents = true;
-  Map<String, String> _agentIdToNameMap = {};
+  Map<String, String> _agentIdMap = {};
   List<BarChartGroupData> _chartData = [];
 
   @override
@@ -50,15 +49,18 @@ class _ReportsScreenState extends State<ReportsScreen> {
           .get();
       
       setState(() {
-        _agentIdToNameMap = {
+        _agentIdMap = {
           for (var doc in snapshot.docs) 
-            doc.id: doc['name'] as String
+            doc['name'] as String: doc.id
         };
-        _allAgents = _agentIdToNameMap.values.toList();
+        _allAgents = _agentIdMap.keys.toList();
         _selectedAgents = List.from(_allAgents);
       });
     } catch (e) {
-      _handleError('Error fetching agents: $e');
+      debugPrint('Error fetching agents: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error loading agents: ${e.toString()}')),
+      );
     }
   }
 
@@ -70,67 +72,59 @@ class _ReportsScreenState extends State<ReportsScreen> {
       final data = await _getChartData();
       setState(() => _chartData = data);
     } catch (e) {
-      _handleError('Error loading chart data: $e');
+      debugPrint('Error loading chart data: $e');
       setState(() => _chartData = []);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error loading data: ${e.toString()}')),
+      );
     } finally {
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 
   Future<List<BarChartGroupData>> _getChartData() async {
-    try {
-      Query query = _firestore.collectionGroup('sales')
-        .where('date', isGreaterThanOrEqualTo: _dateRange.start)
-        .where('date', isLessThanOrEqualTo: _dateRange.end);
+    Query query = _firestore.collectionGroup('sales')
+      .where('date', isGreaterThanOrEqualTo: _dateRange.start)
+      .where('date', isLessThanOrEqualTo: _dateRange.end);
 
-      if (!_selectAllAgents && _selectedAgents.isNotEmpty) {
-        final agentIds = _selectedAgents.map((name) => 
-          _agentIdToNameMap.keys.firstWhere((id) => _agentIdToNameMap[id] == name))
-          .toList();
-        query = query.where('agentId', whereIn: agentIds);
-      }
-
-      final QuerySnapshot snapshot = await query.orderBy('date').get();
-      final Map<String, double> groupedData = {};
-
-      for (final doc in snapshot.docs) {
-        try {
-          final date = (doc['date'] as Timestamp).toDate();
-          final amount = (doc['totalAmount'] as num?)?.toDouble() ?? 0.0;
-          final agentId = doc['agentId'] as String? ?? '';
-          final agentName = _agentIdToNameMap[agentId] ?? 'Unknown';
-          final periodKey = _getPeriodKey(date);
-          final groupKey = '${periodKey}_$agentName';
-          
-          groupedData.update(
-            groupKey,
-            (value) => value + amount,
-            ifAbsent: () => amount,
-          );
-        } catch (e) {
-          debugPrint('Error processing document ${doc.id}: $e');
-        }
-      }
-
-      final groupKeys = groupedData.keys.toList();
-      return groupedData.entries.map((entry) {
-        return BarChartGroupData(
-          x: groupKeys.indexOf(entry.key),
-          barRods: [
-            BarChartRodData(
-              toY: entry.value,
-              color: Colors.blue,
-              width: 16,
-              borderRadius: BorderRadius.circular(4),
-            ),
-          ],
-          showingTooltipIndicators: [0],
-        );
-      }).toList();
-    } catch (e) {
-      debugPrint('Error fetching chart data: $e');
-      return [];
+    if (!_selectAllAgents && _selectedAgents.isNotEmpty) {
+      final agentIds = _selectedAgents.map((name) => _agentIdMap[name]!).toList();
+      query = query.where('agentId', whereIn: agentIds);
     }
+
+    final QuerySnapshot snapshot = await query.orderBy('date').get();
+
+    final Map<String, double> groupedData = {};
+    
+    for (final doc in snapshot.docs) {
+      final date = (doc['date'] as Timestamp).toDate();
+      final amount = doc['totalAmount'].toDouble();
+      final agentName = doc['agentId'] as String? ?? 'Unknown';
+      final periodKey = _getPeriodKey(date);
+      final groupKey = '${periodKey}_$agentName';
+      
+      groupedData.update(
+        groupKey,
+        (value) => value + amount,
+        ifAbsent: () => amount,
+      );
+    }
+
+    return groupedData.entries.map((entry) {
+      return BarChartGroupData(
+        x: groupedData.keys.toList().indexOf(entry.key),
+        barRods: [
+          BarChartRodData(
+            toY: entry.value,
+            color: Colors.blue,
+            width: 16,
+            borderRadius: BorderRadius.circular(4),
+          ),
+        ],
+      );
+    }).toList();
   }
 
   Future<Map<String, Map<String, double>>> _getExportData() async {
@@ -140,23 +134,24 @@ class _ReportsScreenState extends State<ReportsScreen> {
         .where('date', isLessThanOrEqualTo: _dateRange.end);
 
       if (!_selectAllAgents && _selectedAgents.isNotEmpty) {
-        final agentIds = _selectedAgents.map((name) => 
-          _agentIdToNameMap.keys.firstWhere((id) => _agentIdToNameMap[id] == name))
-          .toList();
+        final agentIds = _selectedAgents.map((name) => _agentIdMap[name]!).toList();
         query = query.where('agentId', whereIn: agentIds);
       }
 
       final QuerySnapshot snapshot = await query.orderBy('date').get();
-      final Map<String, Map<String, double>> exportData = {};
 
+      final Map<String, Map<String, double>> exportData = {};
+      
       for (final doc in snapshot.docs) {
         final date = (doc['date'] as Timestamp).toDate();
-        final amount = (doc['totalAmount'] as num).toDouble();
-        final agentId = doc['agentId'] as String;
-        final agentName = _agentIdToNameMap[agentId] ?? 'Unknown';
+        final amount = doc['totalAmount'].toDouble();
+        final agentName = doc['agentId'] as String? ?? 'Unknown';
         final periodKey = _getPeriodKey(date);
-
-        exportData.putIfAbsent(periodKey, () => {});
+        
+        if (!exportData.containsKey(periodKey)) {
+          exportData[periodKey] = {};
+        }
+        
         exportData[periodKey]!.update(
           agentName,
           (value) => value + amount,
@@ -184,39 +179,24 @@ class _ReportsScreenState extends State<ReportsScreen> {
     }
   }
 
-  Future<Directory> _getSafeDownloadDirectory() async {
-    try {
-      if (Platform.isAndroid) {
-        // Request permission to manage external storage
-        PermissionStatus permission = await Permission.manageExternalStorage.request();
-        if (!permission.isGranted) {
-          throw Exception('Permission denied to access storage.');
-        }
-
-        // Try to access the real Downloads folder
-        final directories = await getExternalStorageDirectories(type: StorageDirectory.downloads);
-        if (directories == null || directories.isEmpty) {
-          throw Exception('Downloads directory not found.');
-        }
-        return directories.first;
-      } else if (Platform.isIOS) {
-        // For iOS, use the safe downloads directory
-        final directory = await getDownloadsDirectory();
-        if (directory == null) {
-          throw Exception('Downloads directory not available on iOS.');
-        }
-        return directory;
-      } else {
-        // For other platforms, fallback to temporary directory
-        return await getTemporaryDirectory();
+  Future<Directory?> _getDownloadsDirectory() async {
+    // Request storage permission for Android
+    if (Platform.isAndroid) {
+      PermissionStatus status = await Permission.storage.request();
+      if (!status.isGranted) {
+        // Handle if permission is not granted
+        return null;
       }
-    } catch (e) {
-      debugPrint('Error accessing download directory: $e');
-      // If any error happens, fallback to temporary directory
-      return await getTemporaryDirectory();
     }
-  }
 
+    // For Android, return the downloads directory
+    if (Platform.isAndroid) {
+      return await getExternalStorageDirectory(); // Returns a directory for the app's files.
+    }
+
+    // For iOS, get the default directory path for downloads
+    return await getDownloadsDirectory();
+  }
 
   Future<void> _exportToExcel() async {
     setState(() => _isLoading = true);
@@ -232,59 +212,67 @@ class _ReportsScreenState extends State<ReportsScreen> {
       final workbook = xlsio.Workbook();
       final sheet = workbook.worksheets[0];
 
-      // Write Excel content
+      // Add headers
       sheet.getRangeByName('A1').setText('Period');
       int col = 1;
       final allAgents = _selectAllAgents ? _allAgents : _selectedAgents;
+      
       for (final agent in allAgents) {
         sheet.getRangeByIndex(1, ++col).setText(agent);
       }
       sheet.getRangeByIndex(1, ++col).setText('Total');
       sheet.getRangeByName('A1:${_getExcelColumnName(col)}1').cellStyle.bold = true;
 
+      // Add data
       int row = 2;
       data.forEach((period, agentData) {
         sheet.getRangeByIndex(row, 1).setText(period);
+        
         double rowTotal = 0;
         col = 1;
+        
         for (final agent in allAgents) {
           final amount = agentData[agent] ?? 0;
           sheet.getRangeByIndex(row, ++col).setNumber(amount);
           rowTotal += amount;
         }
+        
         sheet.getRangeByIndex(row, ++col).setNumber(rowTotal);
         row++;
       });
 
+      // Add totals column
       sheet.getRangeByIndex(row, 1).setText('TOTAL');
       col = 1;
+      
       for (final agent in allAgents) {
         final colLetter = _getExcelColumnName(++col);
-        sheet.getRangeByName('$colLetter$row').setFormula('SUM(${colLetter}2:${colLetter}${row-1})');
+        sheet.getRangeByName('$colLetter$row').setFormula('SUM($colLetter${2}:$colLetter${row-1})');
       }
+      
       final totalCol = _getExcelColumnName(++col);
-      sheet.getRangeByName('${totalCol}$row').setFormula('SUM(${totalCol}2:${totalCol}${row-1})');
+      sheet.getRangeByName('${totalCol}$row').setFormula('SUM(${totalCol}${2}:${totalCol}${row-1})');
       sheet.getRangeByName('A$row:$totalCol$row').cellStyle.bold = true;
+
+      // Formatting
       sheet.getRangeByName('A1:$totalCol$row').autoFitColumns();
 
-      final bytes = workbook.saveAsStream();
-      workbook.dispose();
-
-      // Ask user to pick a folder
-      String? selectedDirectory = await FilePicker.platform.getDirectoryPath();
-      if (selectedDirectory == null) {
+      // Save file
+      final directory = await _getDownloadsDirectory();
+      if (directory == null) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('No folder selected')),
+          const SnackBar(content: Text('Could not access downloads folder')),
         );
         return;
       }
 
       final fileName = 'SalesReport_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}.xlsx';
-      final file = File('$selectedDirectory/$fileName');
-      await file.writeAsBytes(bytes);
+      final file = File('${directory.path}/$fileName');
+      await file.writeAsBytes(workbook.saveAsStream());
+      workbook.dispose();
 
       await OpenFile.open(file.path);
-
+      
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Exported to $fileName')),
       );
@@ -296,8 +284,6 @@ class _ReportsScreenState extends State<ReportsScreen> {
       if (mounted) setState(() => _isLoading = false);
     }
   }
-
-
 
   String _getExcelColumnName(int column) {
     String name = '';
@@ -354,7 +340,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                     final period = entry.key;
                     final agentData = entry.value;
                     final total = agentData.values.fold(0.0, (sum, amount) => sum + amount);
-
+                    
                     return [
                       period,
                       ...allAgents.map((agent) => agentData[agent]?.toStringAsFixed(2) ?? '0.00'),
@@ -370,16 +356,20 @@ class _ReportsScreenState extends State<ReportsScreen> {
         ),
       );
 
-      // Save the PDF file
-      final directory = await _getSafeDownloadDirectory();
+      final directory = await _getDownloadsDirectory();
+      if (directory == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not access downloads folder')),
+        );
+        return;
+      }
+
       final fileName = 'SalesReport_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}.pdf';
       final file = File('${directory.path}/$fileName');
       await file.writeAsBytes(await pdf.save());
 
-      // Try to open the file
-      final result = await OpenFile.open(file.path);
-
-      // Notify the user
+      await OpenFile.open(file.path);
+      
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Exported to $fileName')),
       );
@@ -391,7 +381,6 @@ class _ReportsScreenState extends State<ReportsScreen> {
       if (mounted) setState(() => _isLoading = false);
     }
   }
-
 
   Future<void> _showAgentFilterDialog() async {
     await showDialog(
