@@ -7,7 +7,8 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:intl/intl.dart';
 import 'package:salesgo/models/product.dart';
 import 'package:salesgo/models/discount.dart';
-import 'package:salesgo/models/category.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 class ProductManagement extends StatefulWidget {
   const ProductManagement({super.key});
@@ -54,7 +55,87 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
     _discountNameController.dispose();
     _discountValueController.dispose();
     _discountTypeController.dispose();
+    _scannerController.dispose();
+
     super.dispose();
+  }
+
+  // Add to your state class
+  final MobileScannerController _scannerController = MobileScannerController();
+
+  Future<void> _scanBarcode() async {
+    try {
+      final status = await Permission.camera.request();
+      if (!status.isGranted) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Camera permission is required')),
+        );
+        return;
+      }
+
+      if (!mounted) return;
+      final barcode = await showDialog<String>(
+        context: context,
+        builder: (context) => Dialog(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: MediaQuery.of(context).size.width * 0.8,
+              maxHeight: MediaQuery.of(context).size.height * 0.6,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Text('Scan Barcode', style: Theme.of(context).textTheme.titleLarge),
+                ),
+                Expanded(
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: MobileScanner(
+                      controller: _scannerController,
+                      onDetect: (capture) {
+                        final barcodes = capture.barcodes;
+                        if (barcodes.isNotEmpty) {
+                          Navigator.pop(context, barcodes.first.rawValue);
+                        }
+                      },
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Text('Point the camera at a barcode',
+                    style: TextStyle(color: Colors.grey[600])),
+                ),
+                TextButton(
+                  onPressed: () {
+                    _scannerController.stop();
+                    Navigator.pop(context);
+                  },
+                  child: const Text('Cancel'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+
+      if (barcode != null && barcode.isNotEmpty && mounted) {
+        setState(() {
+          _barcodeController.text = barcode;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error scanning barcode: ${e.toString()}')),
+        );
+      }
+    } finally {
+      _scannerController.stop();
+    }
   }
 
   Future<void> _pickImage() async {
@@ -826,7 +907,13 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
               ),
               TextFormField(
                 controller: _barcodeController,
-                decoration: const InputDecoration(labelText: 'Barcode'),
+                decoration: InputDecoration(
+                  labelText: 'Barcode',
+                  suffixIcon: IconButton(
+                    icon: const Icon(Icons.qr_code_scanner),
+                    onPressed: _scanBarcode,
+                  ),
+                ),
                 validator: (value) => value!.isEmpty ? 'Required' : null,
               ),
               const SizedBox(height: 20),

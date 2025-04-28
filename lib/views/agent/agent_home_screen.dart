@@ -5,7 +5,7 @@ import 'package:salesgo/viewmodels/discount_vm.dart';
 import 'package:salesgo/viewmodels/stock_vm.dart';
 import 'sales_screen.dart';
 import 'stock_screen.dart';
-import 'history_screen.dart';
+import 'sales_history_screen.dart';
 
 class AgentHomeScreen extends StatefulWidget {
   const AgentHomeScreen({super.key});

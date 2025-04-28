@@ -6,9 +6,8 @@ import 'package:salesgo/viewmodels/auth_vm.dart';
 import 'package:salesgo/viewmodels/sales_vm.dart';
 import 'package:salesgo/widgets/product_details_card.dart';
 import 'package:salesgo/widgets/payment_section.dart';
-import 'package:salesgo/views/agent/history_screen.dart'; // Import your history screen
+import 'package:salesgo/views/agent/sales_history_screen.dart';
 import 'package:salesgo/viewmodels/refund_vm.dart';
-import 'package:salesgo/views/agent/refund_screen.dart';
 
 class SalesScreen extends StatefulWidget {
   const SalesScreen({super.key});
@@ -94,16 +93,23 @@ class _SalesScreenState extends State<SalesScreen> with SingleTickerProviderStat
                       const Icon(Icons.shopping_cart_outlined,
                           size: 64, color: Colors.grey),
                       const SizedBox(height: 20),
-                      const Text('Ready to Process Sale',
-                          style: TextStyle(fontSize: 20)),
+                      Text(
+                        _isScanning ? 'Scanning in progress' : 'Ready to Process Sale',
+                        style: const TextStyle(fontSize: 20),
+                      ),
                       const SizedBox(height: 10),
-                      const Text('Scan products to add to cart',
-                          style: TextStyle(color: Colors.grey)),
+                      Text(
+                        _isScanning ? 'Point camera at barcode' : 'Scan products to add to cart',
+                        style: const TextStyle(color: Colors.grey),
+                      ),
                       const SizedBox(height: 20),
                       ElevatedButton.icon(
-                        icon: const Icon(Icons.qr_code_scanner),
-                        label: const Text('Start Scanning'),
+                        icon: Icon(_isScanning ? Icons.stop : Icons.qr_code_scanner),
+                        label: Text(_isScanning ? 'Stop Scanning' : 'Start Scanning'),
                         onPressed: _toggleScanning,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: _isScanning ? Colors.red : null,
+                        ),
                       ),
                     ],
                   ),

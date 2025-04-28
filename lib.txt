@@ -19,6 +19,7 @@ lib/
 ├── viewmodels/
 │   ├── auth_vm.dart
 │   ├── discount_vm.dart
+│   ├── refund_vm.dart
 │   ├── sales_vm.dart
 │   └── stock_vm.dart
 ├── views/
@@ -32,8 +33,8 @@ lib/
 │   ├── agent/
 │   │   ├── agent_home_screen.dart
 │   │   ├── history_screen.dart
+│   │   ├── refund_screen.dart
 │   │   ├── sales_screen.dart
-│   │   ├── stock_screen copy.dart
 │   │   └── stock_screen.dart
 │   ├── login_screen.dart
 │   └── signup_screen.dart
@@ -179,6 +180,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:salesgo/firebase_options.dart';
 import 'package:salesgo/viewmodels/discount_vm.dart';
+import 'package:salesgo/viewmodels/refund_vm.dart';
 import 'package:salesgo/viewmodels/sales_vm.dart';
 import 'package:salesgo/viewmodels/stock_vm.dart';
 import 'package:salesgo/views/admin/admin_home_screen.dart';
@@ -218,6 +220,9 @@ void main() async {
         ChangeNotifierProvider(create: (context) => DiscountViewModel(
           firestoreService: context.read<FirestoreService>(),
         )),
+        ChangeNotifierProvider(create: (context) => RefundViewModel(
+          firestoreService: context.read<FirestoreService>(),
+        )),        
       ],
       child: const MyApp(),
     ),
@@ -353,25 +358,26 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 class Discount {
   final String id;
   final DocumentReference categoryRef;
-  final DateTime startDate;
-  final DateTime endDate;
+  final DateTime? startDate;
+  final DateTime? endDate;
   final double value;
   final String type;
+  final bool hasDateRange;
   final String name;
   final DocumentReference? reference;
 
   Discount({
     required this.id,
     required this.categoryRef,
-    required this.startDate,
-    required this.endDate,
+    this.startDate,
+    this.endDate,
     required this.value,
+    required this.hasDateRange,
     required this.type,
     required this.name,
     this.reference,
   });
 
-  /// Creates a Discount from a Firestore DocumentSnapshot
   factory Discount.fromFirestore(DocumentSnapshot doc) {
     try {
       final data = doc.data() as Map<String, dynamic>;
@@ -379,10 +385,11 @@ class Discount {
       return Discount(
         id: doc.id,
         categoryRef: data['categoryRef'] as DocumentReference,
-        startDate: (data['startDate'] as Timestamp).toDate(),
-        endDate: (data['endDate'] as Timestamp).toDate(),
+        startDate: data['hasDateRange'] ? (data['startDate'] as Timestamp).toDate() : null,
+        endDate: data['hasDateRange'] ? (data['endDate'] as Timestamp).toDate() : null,
         value: (data['value'] as num).toDouble(),
         type: data['type'] as String,
+        hasDateRange: data['hasDateRange'] as bool? ?? false,
         name: data['name'] as String? ?? '',
         reference: doc.reference,
       );
@@ -391,31 +398,30 @@ class Discount {
     }
   }
 
-
-
-  /// Converts the Discount to a Map for Firestore
   Map<String, dynamic> toMap() {
     return {
       'id': id,
       'categoryRef': categoryRef,
-      'startDate': Timestamp.fromDate(startDate),
-      'endDate': Timestamp.fromDate(endDate),
+      if (hasDateRange && startDate != null) 'startDate': Timestamp.fromDate(startDate!),
+      if (hasDateRange && endDate != null) 'endDate': Timestamp.fromDate(endDate!),
       'value': value,
       'type': type,
-      if (name.isNotEmpty) 'name': name,
+      'hasDateRange': hasDateRange,
+      'name': name,
     };
   }
 
-  /// Helper method to check if discount is currently active
   bool get isActive {
+    if (!hasDateRange) return true;
+    if (startDate == null || endDate == null) return false;
     final now = DateTime.now();
-    return now.isAfter(startDate) && now.isBefore(endDate);
+    return now.isAfter(startDate!) && now.isBefore(endDate!);
   }
 
   @override
   String toString() {
     return 'Discount(id: $id, name: $name, value: $value$type, '
-           'active: ${startDate.toIso8601String()} to ${endDate.toIso8601String()})';
+           'active: ${hasDateRange ? '${startDate?.toIso8601String()} to ${endDate?.toIso8601String()}' : 'Always active'})';
   }
 }
 
@@ -796,19 +802,37 @@ class FirestoreService {
     return FirebaseFirestore.instance
         .collection('sales')
         .where('locationId', isEqualTo: locationId)
-        .where('timestamp', isGreaterThanOrEqualTo: firstDayOfMonth)
+        .where('date', isGreaterThanOrEqualTo: Timestamp.fromDate(firstDayOfMonth))
         .snapshots()
         .map((snapshot) {
+          debugPrint('Fetched sales count: ${snapshot.docs.length}');
+          
+          for (final doc in snapshot.docs) {
+            debugPrint('Fetched sale: ${doc.data()}');
+          }
+
           final monthlySales = <String, int>{};
           for (final doc in snapshot.docs) {
             final sale = doc.data() as Map<String, dynamic>;
-            final productId = sale['productId'] as String;
-            final quantity = sale['quantity'] as int;
-            monthlySales[productId] = (monthlySales[productId] ?? 0) + quantity;
+            final List<dynamic> products = sale['products'] ?? [];
+
+            for (final product in products) {
+              final productId = product['id'] as String;
+
+              //  Check if 'quantity' exists, else default to 1
+              final quantity = (product['quantity'] != null) 
+                  ? product['quantity'] as int 
+                  : 1;
+
+              monthlySales[productId] = (monthlySales[productId] ?? 0) + quantity;
+            }
           }
           return monthlySales;
         });
-  }  
+  }
+
+
+
 
   // Stocks
   Stream<Map<String, int>> getLocationStock(String locationId) {
@@ -863,7 +887,41 @@ class FirestoreService {
     }
   }
 
+  Future<void> processRefund({
+    required List<Product> products,
+    required String agentId,
+    required String locationId,
+  }) async {
+    try {
+      final batch = FirebaseFirestore.instance.batch();
+      final refundDoc = FirebaseFirestore.instance.collection('refunds').doc();
+      
+      // Create refund record
+      batch.set(refundDoc, {
+        'products': products.map((p) => p.toMap()).toList(),
+        'totalAmount': products.fold(0.0, (sum, p) => sum + p.price),
+        'agentId': agentId,
+        'locationId': locationId,
+        'date': FieldValue.serverTimestamp(),
+        'status': 'completed',
+      });
 
+      // Update inventory for each product
+      for (final product in products) {
+        final productRef = FirebaseFirestore.instance
+            .collection('products')
+            .doc(product.id);
+        
+        batch.update(productRef, {
+          'stock': FieldValue.increment(1),
+        });
+      }
+
+      await batch.commit();
+    } catch (e) {
+      throw Exception('Failed to process refund: $e');
+    }
+  }
 
   // Categories
   Future<void> addCategory(Map<String, dynamic> categoryData) async {
@@ -1165,6 +1223,61 @@ extension on List<Discount> {
   get docs => null;
 }
 
+viewmodels\refund_vm.dart:
+
+# viewmodels\refund_vm.dart
+import 'package:flutter/material.dart';
+import 'package:salesgo/models/product.dart';
+import 'package:salesgo/services/firestore_service.dart';
+
+class RefundViewModel with ChangeNotifier {
+  final FirestoreService _firestoreService;
+  final List<Product> _refundItems = [];
+  
+  RefundViewModel({required FirestoreService firestoreService})
+      : _firestoreService = firestoreService;
+
+  List<Product> get refundItems => _refundItems;
+  
+  double get totalRefundAmount => _refundItems.fold(
+    0.0, 
+    (sum, product) => sum + product.price
+  );
+
+  void addToRefund(Product product) {
+    _refundItems.add(product);
+    notifyListeners();
+  }
+
+  void removeFromRefund(int index) {
+    _refundItems.removeAt(index);
+    notifyListeners();
+  }
+
+  void clearRefund() {
+    _refundItems.clear();
+    notifyListeners();
+  }
+
+  Future<void> processRefund({
+    required String agentId,
+    required String locationId,
+  }) async {
+    if (_refundItems.isEmpty) return;
+
+    try {
+      await _firestoreService.processRefund(
+        products: _refundItems,
+        agentId: agentId,
+        locationId: locationId,
+      );
+      clearRefund();
+    } catch (e) {
+      rethrow;
+    }
+  }
+}
+
 viewmodels\sales_vm.dart:
 
 # viewmodels\sales_vm.dart
@@ -1188,22 +1301,24 @@ class SalesViewModel with ChangeNotifier {
 
   double get totalAmount => _calculateTotal();
 
-  // Method to set selected discount for a product
+  // Select a discount for a specific product
   void selectDiscountForProduct(String productId, Discount? discount) {
     _selectedDiscounts[productId] = discount;
     notifyListeners();
   }
 
-  // Method to get selected discount for a product
+  // Get selected discount for a product
   Discount? getSelectedDiscountForProduct(String productId) {
     return _selectedDiscounts[productId];
-  }  
+  }
 
+  // Add product to cart
   void addToCart(Product product) {
     _cartItems.add(product);
     notifyListeners();
   }
 
+  // Remove product from cart
   void removeFromCart(int index) {
     if (index >= 0 && index < _cartItems.length) {
       _cartItems.removeAt(index);
@@ -1211,72 +1326,79 @@ class SalesViewModel with ChangeNotifier {
     }
   }
 
-
-Future<void> confirmSale({
-  required String paymentMethod,
-  required String agentId,
-  String? couponCode,
-}) async {
-  try {
-    if (_cartItems.isEmpty) {
-      throw Exception('Cannot confirm sale with empty cart');
-    }
-
-    // Apply selected discounts to products
-    final discountedProducts = _cartItems.map((product) {
-      final discount = _selectedDiscounts[product.id];
-      if (discount != null) {
-        return Product(
-          id: product.id,
-          name: product.name,
-          price: _calculatePriceWithDiscount(product.price, discount),
-          categoryRef: product.categoryRef,
-          barcode: product.barcode,
-          imageUrl: product.imageUrl,
-        );
+  // Confirm and save the sale
+  Future<void> confirmSale({
+    required String paymentMethod,
+    required String agentId,
+    required String locationId, // 🔥 locationId now required
+    String? couponCode,
+  }) async {
+    try {
+      if (_cartItems.isEmpty) {
+        throw Exception('Cannot confirm sale with an empty cart.');
       }
-      return product;
-    }).toList();
 
-    final sale = Sale(
-      id: _uuid.v4(),
-      agentId: agentId,
-      date: DateTime.now(),
-      products: discountedProducts,
-      totalAmount: discountedProducts.fold(0, (sum, item) => sum + item.price),
-      paymentMethod: paymentMethod,
-      couponCode: couponCode,
-      locationId: '',
-    );
+      // Apply discounts if any
+      final discountedProducts = _cartItems.map((product) {
+        final discount = _selectedDiscounts[product.id];
+        if (discount != null) {
+          return Product(
+            id: product.id,
+            name: product.name,
+            price: _calculatePriceWithDiscount(product.price, discount),
+            categoryRef: product.categoryRef,
+            barcode: product.barcode,
+            imageUrl: product.imageUrl,
+          );
+        }
+        return product;
+      }).toList();
 
-    await _firestoreService.recordSale(sale);
-    clearCart();
-    _selectedDiscounts.clear(); // Clear selected discounts after sale
-  } catch (e) {
-    rethrow;
+      final sale = Sale(
+        id: _uuid.v4(),
+        agentId: agentId,
+        locationId: locationId, // 🔥 set correctly here
+        date: DateTime.now(),
+        products: discountedProducts,
+        totalAmount: discountedProducts.fold(0, (sum, item) => sum + item.price),
+        paymentMethod: paymentMethod,
+        couponCode: couponCode,
+      );
+
+      await _firestoreService.recordSale(sale);
+      clearCart();
+      _selectedDiscounts.clear(); // Clear applied discounts after sale
+    } catch (e) {
+      debugPrint('Error confirming sale: $e');
+      rethrow;
+    }
   }
-}
 
-double _calculatePriceWithDiscount(double basePrice, Discount discount) {
-  return discount.type == '%' 
-      ? basePrice * (1 - discount.value / 100)
-      : basePrice - discount.value;
-}
-
+  // Clear the cart
   void clearCart() {
     _cartItems.clear();
     notifyListeners();
   }
 
+  // Calculate the total price
   double _calculateTotal() {
     return _cartItems.fold(0, (sum, item) => sum + (item.price ?? 0));
   }
+
+  // Calculate price after applying discount
+  double _calculatePriceWithDiscount(double basePrice, Discount discount) {
+    return discount.type == '%' 
+        ? basePrice * (1 - discount.value / 100)
+        : basePrice - discount.value;
+  }
 }
+
 
 viewmodels\stock_vm.dart:
 
 # viewmodels\stock_vm.dart
 import 'dart:async';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import '../services/firestore_service.dart';
 
@@ -1285,7 +1407,6 @@ class StockViewModel with ChangeNotifier {
   Map<String, int> _stock = {};
   Map<String, int> _monthlySales = {};
   bool _isLoading = false;
-  StreamSubscription<Map<String, int>>? _stockSubscription;
   StreamSubscription<Map<String, int>>? _salesSubscription;
 
   StockViewModel({required FirestoreService firestoreService})
@@ -1303,33 +1424,46 @@ class StockViewModel with ChangeNotifier {
     return adjusted;
   }
 
-  void loadStock(String locationId) {
-    _stockSubscription?.cancel();
+  Future<void> loadStock(String locationId) async {
     _salesSubscription?.cancel();
-    
+
     _isLoading = true;
     notifyListeners();
-    
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      // Load current stock
-      _stockSubscription = _firestoreService.getLocationStock(locationId).listen(
-        (stockData) {
-          _stock = stockData;
-          _loadMonthlySales(locationId);
-        },
-        onError: (error) {
-          _isLoading = false;
-          notifyListeners();
-          debugPrint('Error loading stock: $error');
-        },
-      );
-    });
+
+    try {
+      // 🔥 Load assigned stock from stockHistory
+      final assignedStock = await _loadAssignedStockFromHistory(locationId);
+      _stock = assignedStock;
+
+      _loadMonthlySales(locationId);
+    } catch (error) {
+      _isLoading = false;
+      notifyListeners();
+      debugPrint('Error loading stock: $error');
+    }
+  }
+
+  Future<Map<String, int>> _loadAssignedStockFromHistory(String locationId) async {
+    final snapshot = await FirebaseFirestore.instance
+        .collection('stockHistory')
+        .where('locationId', isEqualTo: locationId)
+        .get();
+
+    final Map<String, int> assignedStock = {};
+    for (final doc in snapshot.docs) {
+      final data = doc.data();
+      final productId = data['productId'] as String;
+      final quantity = data['quantity'] as int;
+
+      assignedStock[productId] = (assignedStock[productId] ?? 0) + quantity;
+    }
+    return assignedStock;
   }
 
   void _loadMonthlySales(String locationId) {
     final now = DateTime.now();
     final firstDayOfMonth = DateTime(now.year, now.month, 1);
-    
+
     _salesSubscription = _firestoreService
         .getMonthlySales(locationId, firstDayOfMonth)
         .listen((salesData) {
@@ -1345,11 +1479,11 @@ class StockViewModel with ChangeNotifier {
 
   @override
   void dispose() {
-    _stockSubscription?.cancel();
     _salesSubscription?.cancel();
     super.dispose();
   }
 }
+
 
 views\login_screen.dart:
 
@@ -2566,20 +2700,28 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
                             '${discount.value}${discount.type} discount',
                             style: const TextStyle(fontWeight: FontWeight.bold),
                           ),
-                          Text(
-                            'Valid: ${DateFormat('MMM dd').format(discount.startDate)} - '
-                            '${DateFormat('MMM dd, yyyy').format(discount.endDate)}',
-                          ),
-                          if (discount.isActive)
-                            Chip(
-                              label: const Text('Active'),
-                              backgroundColor: Colors.green[100],
-                            )
-                          else
-                            Chip(
-                              label: const Text('Expired'),
-                              backgroundColor: Colors.red[100],
+                          const SizedBox(height: 4),
+                          if (discount.hasDateRange && discount.startDate != null && discount.endDate != null) ...[
+                            Text(
+                              'Valid: ${DateFormat('MMM dd, yyyy').format(discount.startDate!)} - '
+                              '${DateFormat('MMM dd, yyyy').format(discount.endDate!)}',
                             ),
+                            const SizedBox(height: 4),
+                            discount.isActive
+                                ? Chip(
+                                    label: const Text('Active'),
+                                    backgroundColor: Colors.green[100],
+                                  )
+                                : Chip(
+                                    label: const Text('Expired'),
+                                    backgroundColor: Colors.red[100],
+                                  ),
+                          ] else ...[
+                            Chip(
+                              label: const Text('Always Active'),
+                              backgroundColor: Colors.blue[100],
+                            ),
+                          ],
                         ],
                       ),
                       trailing: Row(
@@ -3321,9 +3463,11 @@ class _StockManagementState extends State<StockManagement> {
                                             ],
                                           ),
                                           trailing: Text(
-                                            DateFormat('dd/MM/yy HH:mm').format(
-                                              (data['timestamp'] as Timestamp).toDate(),
-                                            ),
+                                            data['timestamp'] != null 
+                                                ? DateFormat('dd/MM/yy HH:mm').format(
+                                                    (data['timestamp'] as Timestamp).toDate(),
+                                                  )
+                                                : 'No date', // Fallback for null timestamp
                                           ),
                                         ),
                                       );
@@ -3368,22 +3512,43 @@ class _StockManagementState extends State<StockManagement> {
       final authVM = Provider.of<AuthViewModel>(context, listen: false);
 
       try {
-        // Update stock
-        await FirebaseFirestore.instance
-            .collection('locations/$_selectedLocationId/stock')
-            .doc(productId)
-            .set({'quantity': quantity});
-
-        // Record history if admin
-        if (authVM.userRole == 'admin') {
-          await FirebaseFirestore.instance.collection('stockHistory').add({
-            'locationId': _selectedLocationId,
-            'productId': productId,
-            'quantity': quantity,
-            'timestamp': DateTime.now(),
-            'adminId': authVM.currentUser?.uid,
-          });
+        // Verify admin role before proceeding
+        if (authVM.userRole != 'admin') {
+          throw Exception('Only administrators can assign stock');
         }
+
+        // Use batch write for atomic operations
+        final batch = FirebaseFirestore.instance.batch();
+
+        // 1. Update stock quantity
+        final stockRef = FirebaseFirestore.instance
+            .collection('locations')
+            .doc(_selectedLocationId)
+            .collection('stock')
+            .doc(productId);
+        batch.set(stockRef, {
+          'quantity': quantity,
+          'lastUpdated': FieldValue.serverTimestamp(),
+          'updatedBy': authVM.currentUser?.uid,
+        });
+
+        // 2. Add to stock history
+        final historyRef = FirebaseFirestore.instance
+            .collection('stockHistory')
+            .doc();
+        batch.set(historyRef, {
+          'locationId': _selectedLocationId,
+          'productId': productId,
+          'productName': _selectedProduct!['name'], // Added product name for better tracking
+          'previousQuantity': FieldValue.increment(0), // Placeholder if you want to track changes
+          'quantity': quantity,
+          'timestamp': FieldValue.serverTimestamp(),
+          'adminId': authVM.currentUser?.uid,
+          'adminName': authVM.currentUser?.name ?? 'Admin',
+        });
+
+        // Execute both operations atomically
+        await batch.commit();
 
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Stock updated successfully')),
@@ -3393,14 +3558,18 @@ class _StockManagementState extends State<StockManagement> {
         _productController.clear();
         _quantityController.clear();
         setState(() => _selectedProduct = null);
-        FocusScope.of(context).requestFocus(FocusNode());
+        FocusScope.of(context).unfocus();
       } catch (e) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error updating stock: ${e.toString()}')),
+          SnackBar(
+            content: Text('Error updating stock: ${e.toString()}'),
+            duration: const Duration(seconds: 5),
+          ),
         );
       }
     }
   }
+
 }
 
 views\admin\users_management.dart:
@@ -3560,7 +3729,6 @@ import 'package:provider/provider.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:salesgo/models/product.dart';
 import 'package:salesgo/models/sale.dart';
-import 'package:salesgo/models/discount.dart';
 import '../../viewmodels/auth_vm.dart';
 import '../../widgets/sale_item.dart';
 
@@ -3883,11 +4051,18 @@ Widget _buildGroupedByCategory(List<Sale> sales) {
             ? FirebaseFirestore.instance.doc(data.categoryId).get()
             : FirebaseFirestore.instance.collection('categories').doc(data.categoryId).get(),
         builder: (context, snapshot) {
-          // Get category name or fallback
-          final categoryName = snapshot.hasData 
-              ? snapshot.data!.get('name') ?? 'Uncategorized'
-              : 'Loading...';
-          
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const ListTile(
+              leading: Icon(Icons.category),
+              title: Text('Loading...'),
+            );
+          }
+
+          String categoryName = 'Uncategorized';
+          if (snapshot.hasData && snapshot.data!.exists) {
+            categoryName = snapshot.data!.get('name') ?? 'Uncategorized';
+          }
+
           return ExpansionTile(
             leading: const Icon(Icons.category),
             title: Text(categoryName),
@@ -3909,7 +4084,7 @@ Widget _buildGroupedByCategory(List<Sale> sales) {
                       future: _getTopProductsInCategory(sales, data.categoryId),
                       builder: (context, productSnapshot) {
                         if (!productSnapshot.hasData) {
-                          return const CircularProgressIndicator();
+                          return const Center(child: CircularProgressIndicator());
                         }
                         return Column(
                           children: productSnapshot.data!.take(3).map((product) {
@@ -3974,6 +4149,7 @@ Widget _buildGroupedByCategory(List<Sale> sales) {
       );
     }).toList(),
   );
+
 }
 
 Future<List<Product>> _getTopProductsInCategory(List<Sale> sales, String categoryId) async {
@@ -4067,31 +4243,30 @@ Future<List<Product>> _getTopProductsInCategory(List<Sale> sales, String categor
 
 }
 
-views\agent\sales_screen.dart:
+views\agent\refund_screen.dart:
 
-# views\agent\sales_screen.dart
+# views\agent\refund_screen.dart
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:provider/provider.dart';
 import 'package:salesgo/services/firestore_service.dart';
 import 'package:salesgo/viewmodels/auth_vm.dart';
-import 'package:salesgo/viewmodels/sales_vm.dart';
+import 'package:salesgo/viewmodels/refund_vm.dart';
 import 'package:salesgo/widgets/product_details_card.dart';
-import 'package:salesgo/widgets/payment_section.dart';
 
-class SalesScreen extends StatefulWidget {
-  const SalesScreen({super.key});
+class RefundScreen extends StatefulWidget {
+  const RefundScreen({super.key});
 
   @override
-  State<SalesScreen> createState() => _SalesScreenState();
+  State<RefundScreen> createState() => _RefundScreenState();
 }
 
-class _SalesScreenState extends State<SalesScreen> {
+class _RefundScreenState extends State<RefundScreen> {
   final MobileScannerController _scannerController = MobileScannerController();
   final FirestoreService _firestoreService = FirestoreService();
-  bool _isScanning = true;
-  bool _isProcessingPayment = false;
-  bool _hasScanned = false; // New flag to track if we've scanned a product
+  bool _isScanning = false;
+  bool _isProcessingRefund = false;
+  bool _hasScanned = false;
 
   @override
   void dispose() {
@@ -4101,12 +4276,12 @@ class _SalesScreenState extends State<SalesScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final salesVM = Provider.of<SalesViewModel>(context);
+    final refundVM = Provider.of<RefundViewModel>(context);
     final authVM = Provider.of<AuthViewModel>(context, listen: false);
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Quick Sale'),
+        title: const Text('Process Refund'),
         actions: [
           IconButton(
             icon: Icon(_isScanning ? Icons.no_photography : Icons.qr_code_scanner),
@@ -4118,7 +4293,313 @@ class _SalesScreenState extends State<SalesScreen> {
         children: [
           Column(
             children: [
-              if (_isScanning) _buildScannerSection(context, salesVM),
+              if (_isScanning) _buildScannerSection(context, refundVM),
+              Expanded(
+                child: ListView.builder(
+                  itemCount: refundVM.refundItems.length,
+                  itemBuilder: (context, index) => ProductDetailsCard(
+                    product: refundVM.refundItems[index],
+                    onRemove: () {
+                      refundVM.removeFromRefund(index);
+                      if (refundVM.refundItems.isEmpty) {
+                        setState(() => _hasScanned = false);
+                      }
+                    },
+                  ),
+                ),
+              ),
+              if (refundVM.refundItems.isNotEmpty)
+                _buildRefundControls(context, refundVM, authVM),
+            ],
+          ),
+          if (_isProcessingRefund)
+            const Center(child: CircularProgressIndicator()),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildScannerSection(BuildContext context, RefundViewModel refundVM) {
+    return Container(
+      height: 200,
+      decoration: BoxDecoration(
+        border: Border.all(color: Colors.grey),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: MobileScanner(
+        controller: _scannerController,
+        onDetect: (capture) {
+          if (!_hasScanned) {
+            _handleBarcodeScan(capture, context, refundVM);
+          }
+        },
+      ),
+    );
+  }
+
+  Widget _buildRefundControls(BuildContext context, RefundViewModel refundVM, AuthViewModel authVM) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 8,
+            offset: const Offset(0, -4),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text('Total Refund:', style: TextStyle(fontSize: 18)),
+              Text(
+                '€${refundVM.totalRefundAmount.toStringAsFixed(2)}',
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () => refundVM.clearRefund(),
+                  child: const Text('Clear'),
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.red, // Red color for refund action
+                  ),
+                  onPressed: () => _processRefund(context, refundVM, authVM),
+                  child: const Text('Process Refund'),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _handleBarcodeScan(
+    BarcodeCapture capture,
+    BuildContext context,
+    RefundViewModel refundVM,
+  ) async {
+    if (capture.barcodes.isEmpty || _hasScanned) return;
+
+    final barcode = capture.barcodes.first.rawValue;
+    if (barcode == null) return;
+
+    setState(() {
+      _hasScanned = true;
+      _isScanning = false;
+    });
+    _scannerController.stop();
+
+    try {
+      final product = await _firestoreService.getProductByBarcode(barcode);
+      if (product == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Product not found')),
+        );
+        setState(() => _hasScanned = false);
+        return;
+      }
+
+      refundVM.addToRefund(product);
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: ${e.toString()}')),
+      );
+      setState(() => _hasScanned = false);
+    }
+  }
+
+  void _toggleScanning() {
+    setState(() {
+      _isScanning = !_isScanning;
+      if (_isScanning) {
+        _hasScanned = false;
+        _scannerController.start();
+      } else {
+        _scannerController.stop();
+      }
+    });
+  }
+
+  Future<void> _processRefund(
+    BuildContext context,
+    RefundViewModel refundVM,
+    AuthViewModel authVM,
+  ) async {
+    if (authVM.currentUser == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('User not authenticated')),
+      );
+      return;
+    }
+
+    if (refundVM.refundItems.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No items to refund')),
+      );
+      return;
+    }
+
+    setState(() => _isProcessingRefund = true);
+
+    try {
+      // Implement your refund logic here
+      // Example: await _firestoreService.processRefund(...);
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Refund processed successfully!')),
+      );
+
+      refundVM.clearRefund();
+      setState(() {
+        _isScanning = true;
+        _isProcessingRefund = false;
+        _hasScanned = false;
+      });
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error processing refund: ${e.toString()}')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isProcessingRefund = false);
+      }
+    }
+  }
+}
+
+views\agent\sales_screen.dart:
+
+# views\agent\sales_screen.dart
+import 'package:flutter/material.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:provider/provider.dart';
+import 'package:salesgo/services/firestore_service.dart';
+import 'package:salesgo/viewmodels/auth_vm.dart';
+import 'package:salesgo/viewmodels/sales_vm.dart';
+import 'package:salesgo/widgets/product_details_card.dart';
+import 'package:salesgo/widgets/payment_section.dart';
+import 'package:salesgo/views/agent/history_screen.dart'; // Import your history screen
+import 'package:salesgo/viewmodels/refund_vm.dart';
+import 'package:salesgo/views/agent/refund_screen.dart';
+
+class SalesScreen extends StatefulWidget {
+  const SalesScreen({super.key});
+
+  @override
+  State<SalesScreen> createState() => _SalesScreenState();
+}
+
+class _SalesScreenState extends State<SalesScreen> with SingleTickerProviderStateMixin {
+  final MobileScannerController _scannerController = MobileScannerController();
+  final FirestoreService _firestoreService = FirestoreService();
+  bool _isScanning = false;
+  bool _isProcessingPayment = false;
+  bool _hasScanned = false;
+  late TabController _tabController;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 3, vsync: this);
+    _scannerController.stop(); // Ensure scanner is stopped initially
+  }
+
+  @override
+  void dispose() {
+    _scannerController.dispose();
+    _tabController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final salesVM = Provider.of<SalesViewModel>(context);
+    final authVM = Provider.of<AuthViewModel>(context, listen: false);
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Quick Sale'),
+        bottom: TabBar(
+          controller: _tabController,
+          tabs: const [
+            Tab(icon: Icon(Icons.shopping_cart)),
+            Tab(icon: Icon(Icons.history)),
+            Tab(icon: Icon(Icons.assignment_return)),
+          ],
+        ),
+        actions: [
+          if (_tabController.index == 0) // Only show scanner toggle on sales tab
+            IconButton(
+              icon: Icon(_isScanning ? Icons.no_photography : Icons.qr_code_scanner),
+              onPressed: _toggleScanning,
+            ),
+        ],
+      ),
+      body: TabBarView(
+        controller: _tabController,
+        children: [
+          // Sales Tab
+          _buildSalesTab(context, salesVM, authVM),
+          
+          // History Tab
+          const HistoryScreen(),
+          
+          // Refund Tab
+          _buildRefundTab(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSalesTab(BuildContext context, SalesViewModel salesVM, AuthViewModel authVM) {
+    return Stack(
+      children: [
+        Column(
+          children: [
+            if (_isScanning) _buildScannerSection(context, salesVM),
+            if (salesVM.cartItems.isEmpty)
+              Expanded(
+                child: Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.shopping_cart_outlined,
+                          size: 64, color: Colors.grey),
+                      const SizedBox(height: 20),
+                      const Text('Ready to Process Sale',
+                          style: TextStyle(fontSize: 20)),
+                      const SizedBox(height: 10),
+                      const Text('Scan products to add to cart',
+                          style: TextStyle(color: Colors.grey)),
+                      const SizedBox(height: 20),
+                      ElevatedButton.icon(
+                        icon: const Icon(Icons.qr_code_scanner),
+                        label: const Text('Start Scanning'),
+                        onPressed: _toggleScanning,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            if (salesVM.cartItems.isNotEmpty)
               Expanded(
                 child: ListView.builder(
                   itemCount: salesVM.cartItems.length,
@@ -4126,37 +4607,164 @@ class _SalesScreenState extends State<SalesScreen> {
                     product: salesVM.cartItems[index],
                     onRemove: () {
                       salesVM.removeFromCart(index);
-                      // Reset scan state when product is removed
                       if (salesVM.cartItems.isEmpty) {
-                        setState(() {
-                          _hasScanned = false;
-                        });
+                        setState(() => _hasScanned = false);
                       }
                     },
                   ),
                 ),
               ),
-              if (salesVM.cartItems.isNotEmpty)
-                PaymentSection(
-                  onConfirm: (method, coupon) => _handleSaleConfirmation(
-                    context,
-                    salesVM,
-                    authVM,
-                    method,
-                    coupon,
-                  ),
-                  totalAmount: salesVM.totalAmount,
-                  isProcessing: _isProcessingPayment,
+            if (salesVM.cartItems.isNotEmpty)
+              PaymentSection(
+                onConfirm: (method, coupon) => _handleSaleConfirmation(
+                  context,
+                  salesVM,
+                  authVM,
+                  method,
+                  coupon,
                 ),
-            ],
-          ),
-          if (_isProcessingPayment)
-            const Center(
-              child: CircularProgressIndicator(),
-            ),
-        ],
-      ),
+                totalAmount: salesVM.totalAmount,
+                isProcessing: _isProcessingPayment,
+              ),
+          ],
+        ),
+        if (_isProcessingPayment)
+          const Center(child: CircularProgressIndicator()),
+      ],
     );
+  }
+
+  Widget _buildRefundTab() {
+    return Consumer<AuthViewModel>(
+      builder: (context, authVM, _) {
+        if (authVM.currentUser == null) {
+          return const Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.error_outline, size: 48, color: Colors.red),
+                SizedBox(height: 16),
+                Text('Authentication Required', style: TextStyle(fontSize: 20)),
+                SizedBox(height: 8),
+                Text('Please login to process refunds', 
+                    style: TextStyle(color: Colors.grey)),
+              ],
+            ),
+          );
+        }
+
+        return Consumer<RefundViewModel>(
+          builder: (context, refundVM, _) {
+            if (refundVM.refundItems.isEmpty) {
+              return Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(Icons.assignment_return, 
+                      size: 64, color: Colors.grey),
+                  const SizedBox(height: 20),
+                  const Text('Ready to Process Refund',
+                      style: TextStyle(fontSize: 20)),
+                  const SizedBox(height: 10),
+                  const Text('Scan products to refund',
+                      style: TextStyle(color: Colors.grey)),
+                  const SizedBox(height: 20),
+                  ElevatedButton.icon(
+                    icon: const Icon(Icons.qr_code_scanner),
+                    label: const Text('Start Scanning'),
+                    onPressed: () {
+                      // No need to navigate, we'll show the scanner in this tab
+                      refundVM.clearRefund();
+                      // You might want to set a state to show the scanner here
+                    },
+                  ),
+                ],
+              );
+            }
+
+            return Column(
+              children: [
+                // Your scanner widget when active
+                // Your refund items list
+                Expanded(
+                  child: ListView.builder(
+                    itemCount: refundVM.refundItems.length,
+                    itemBuilder: (context, index) => ProductDetailsCard(
+                      product: refundVM.refundItems[index],
+                      onRemove: () => refundVM.removeFromRefund(index),
+                    ),
+                  ),
+                ),
+                // Refund summary and action buttons
+                Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text('Total Refund:', 
+                              style: TextStyle(fontSize: 18)),
+                          Text(
+                            '€${refundVM.totalRefundAmount.toStringAsFixed(2)}',
+                            style: const TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: refundVM.clearRefund,
+                              child: const Text('Clear'),
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: ElevatedButton(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.red,
+                              ),
+                              onPressed: () => _processRefund(context, refundVM, authVM),
+                              child: const Text('Process Refund'),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<void> _processRefund(
+    BuildContext context,
+    RefundViewModel refundVM,
+    AuthViewModel authVM,
+  ) async {
+    if (refundVM.refundItems.isEmpty) return;
+
+    try {
+      await refundVM.processRefund(
+        agentId: authVM.currentUser!.uid,
+        locationId: authVM.currentUser!.assignedLocationId!,
+      );
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Refund processed successfully!')),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error processing refund: $e')),
+      );
+    }
   }
 
   Widget _buildScannerSection(BuildContext context, SalesViewModel salesVM) {
@@ -4169,7 +4777,7 @@ class _SalesScreenState extends State<SalesScreen> {
       child: MobileScanner(
         controller: _scannerController,
         onDetect: (capture) {
-          if (!_hasScanned) { // Only scan if we haven't already scanned a product
+          if (!_hasScanned) {
             _handleBarcodeScan(capture, context, salesVM);
           }
         },
@@ -4182,16 +4790,16 @@ class _SalesScreenState extends State<SalesScreen> {
     BuildContext context,
     SalesViewModel salesVM,
   ) async {
-    if (capture.barcodes.isEmpty || _hasScanned) return; // Prevent multiple scans
+    if (capture.barcodes.isEmpty || _hasScanned) return;
 
     final barcode = capture.barcodes.first.rawValue;
     if (barcode == null) return;
 
     setState(() {
-      _hasScanned = true; // Ensure scanning stops
+      _hasScanned = true;
       _isScanning = false;
     });
-    _scannerController.stop(); // Stop scanning immediately
+    _scannerController.stop();
 
     try {
       final product = await _firestoreService.getProductByBarcode(barcode);
@@ -4199,7 +4807,7 @@ class _SalesScreenState extends State<SalesScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Product not found')),
         );
-        setState(() => _hasScanned = false); // Allow scanning again if product is not found
+        setState(() => _hasScanned = false);
         return;
       }
 
@@ -4208,23 +4816,21 @@ class _SalesScreenState extends State<SalesScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error: ${e.toString()}')),
       );
-      setState(() => _hasScanned = false); // Allow re-scanning in case of error
+      setState(() => _hasScanned = false);
     }
   }
-
 
   void _toggleScanning() {
     setState(() {
       _isScanning = !_isScanning;
       if (_isScanning) {
-        _hasScanned = false; // Reset scanning state when re-enabling scanner
+        _hasScanned = false;
         _scannerController.start();
       } else {
         _scannerController.stop();
       }
     });
   }
-
 
   Future<void> _handleSaleConfirmation(
     BuildContext context,
@@ -4247,17 +4853,17 @@ class _SalesScreenState extends State<SalesScreen> {
         paymentMethod: paymentMethod,
         couponCode: couponCode,
         agentId: authVM.currentUser!.uid,
+        locationId: authVM.currentUser!.assignedLocationId!, 
       );
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Sale completed successfully!')),
       );
 
-      // Reset the screen after successful payment
       setState(() {
         _isScanning = true;
         _isProcessingPayment = false;
-        _hasScanned = false; // Reset scan state for new sale
+        _hasScanned = false;
       });
       _scannerController.start();
       
@@ -4270,382 +4876,6 @@ class _SalesScreenState extends State<SalesScreen> {
         setState(() => _isProcessingPayment = false);
       }
     }
-  }
-}
-
-views\agent\stock_screen copy.dart:
-
-# views\agent\stock_screen copy.dart
-import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:provider/provider.dart';
-import 'package:intl/intl.dart';
-import '../../viewmodels/stock_vm.dart';
-import '../../models/product.dart';
-import '../../viewmodels/auth_vm.dart';
-
-class StockScreen extends StatefulWidget {
-  const StockScreen({super.key});
-
-  @override
-  State<StockScreen> createState() => _StockScreenState();
-}
-
-class _StockScreenState extends State<StockScreen> with SingleTickerProviderStateMixin {
-  late TabController _tabController;
-
-  @override
-  void initState() {
-    super.initState();
-    _tabController = TabController(length: 2, vsync: this);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _loadData());
-  }
-
-  @override
-  void dispose() {
-    _tabController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _loadData() async {
-    final authVM = Provider.of<AuthViewModel>(context, listen: false);
-    final stockVM = Provider.of<StockViewModel>(context, listen: false);
-    
-    if (authVM.currentUser?.assignedLocationId != null) {
-      stockVM.loadStock(authVM.currentUser!.assignedLocationId!);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Stock Management'),
-        bottom: TabBar(
-          controller: _tabController,
-          tabs: const [
-            Tab(icon: Icon(Icons.inventory)), 
-            Tab(icon: Icon(Icons.history)),
-        ],
-        ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _loadData,
-          ),
-        ],
-      ),
-      body: Consumer2<AuthViewModel, StockViewModel>(
-        builder: (context, authVM, stockVM, _) {
-          if (authVM.currentUser == null) {
-            return const Center(child: Text('Please log in'));
-          }
-
-          if (authVM.currentUser!.assignedLocationId == null) {
-            return _buildNoLocationAssigned(authVM);
-          }
-
-          return TabBarView(
-            controller: _tabController,
-            children: [
-              _buildCurrentStockTab(stockVM, authVM),
-              _buildStockHistoryTab(authVM),
-            ],
-          );
-        },
-      ),
-    );
-  }
-
-  Widget _buildNoLocationAssigned(AuthViewModel authVM) {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Icon(Icons.location_off, size: 64, color: Colors.grey),
-          const SizedBox(height: 16),
-          const Text('No location assigned'),
-          const SizedBox(height: 8),
-          Text(
-            'Contact your administrator to assign a location',
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
-          const SizedBox(height: 16),
-          ElevatedButton(
-            onPressed:_loadData,
-            child: const Text('Refresh'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildCurrentStockTab(StockViewModel stockVM, AuthViewModel authVM) {
-    if (stockVM.isLoading) {
-      return const Center(child: CircularProgressIndicator());
-    }
-
-    if (stockVM.stock.isEmpty) {
-      return FutureBuilder<DocumentSnapshot>(
-        future: FirebaseFirestore.instance
-            .collection('locations')
-            .doc(authVM.currentUser!.assignedLocationId)
-            .get(),
-        builder: (context, snapshot) {
-          if (!snapshot.hasData) {
-            return const Center(child: CircularProgressIndicator());
-          }
-
-          final location = snapshot.data!.data() as Map<String, dynamic>? ?? {};
-          return Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Icon(Icons.inventory_2, size: 64, color: Colors.grey),
-                const SizedBox(height: 16),
-                Text(
-                  'No stock available at ${location['name']}',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                const SizedBox(height: 8),
-                const Text('Scan products to add stock'),
-                const SizedBox(height: 16),
-                ElevatedButton(
-                  onPressed: _loadData,
-                  child: const Text('Refresh'),
-                ),
-              ],
-            ),
-          );
-        },
-      );
-    }
-
-    return RefreshIndicator(
-      onRefresh: _loadData,
-      child: ListView.builder(
-        itemCount: stockVM.stock.keys.length,
-        itemBuilder: (context, index) {
-          final productId = stockVM.stock.keys.elementAt(index);
-          final quantity = stockVM.stock[productId] ?? 0;
-
-          return FutureBuilder<DocumentSnapshot>(
-            future: FirebaseFirestore.instance
-                .collection('products')
-                .doc(productId)
-                .get(),
-            builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                return const ListTile(
-                  leading: CircularProgressIndicator(),
-                  title: Text('Loading product...'),
-                );
-              }
-
-              if (!snapshot.hasData || !snapshot.data!.exists) {
-                return ListTile(
-                  leading: const Icon(Icons.error),
-                  title: Text('Product ID: $productId'),
-                  subtitle: const Text('Not found in database'),
-                );
-              }
-
-              final product = Product.fromFirestore(snapshot.data!);
-              return Card(
-                margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                child: ListTile(
-                  leading: product.imageUrl != null
-                      ? Image.network(product.imageUrl!, width: 50, height: 50)
-                      : const Icon(Icons.shopping_bag),
-                  title: Text(product.name),
-                  subtitle: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Quantity: $quantity'),
-                      if (product.barcode.isNotEmpty)
-                        Text('Barcode: ${product.barcode}'),
-                    ],
-                  ),
-                  trailing: Text(
-                    '€${product.price.toStringAsFixed(2)}',
-                    style: const TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                ),
-              );
-            },
-          );
-        },
-      ),
-    );
-  }
-
-  Widget _buildStockHistoryTab(AuthViewModel authVM) {
-    return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance
-          .collection('stockHistory')
-          .where('locationId', isEqualTo: authVM.currentUser!.assignedLocationId)
-          .orderBy('timestamp', descending: true)
-          .snapshots(),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
-        }
-
-        if (snapshot.hasError) {
-          return Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Icon(Icons.error, size: 64, color: Colors.red),
-                const SizedBox(height: 16),
-                const Text('Error loading stock history'),
-                Text(
-                  snapshot.error.toString(),
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-                const SizedBox(height: 16),
-                ElevatedButton(
-                  onPressed: _loadData,
-                  child: const Text('Retry'),
-                ),
-              ],
-            ),
-          );
-        }
-
-        if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-          return FutureBuilder<DocumentSnapshot>(
-            future: FirebaseFirestore.instance
-                .collection('locations')
-                .doc(authVM.currentUser!.assignedLocationId)
-                .get(),
-            builder: (context, locationSnapshot) {
-              if (!locationSnapshot.hasData) {
-                return const Center(child: CircularProgressIndicator());
-              }
-
-              final location = locationSnapshot.data!.data() as Map<String, dynamic>? ?? {};
-              return Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(Icons.history, size: 64, color: Colors.grey),
-                    const SizedBox(height: 16),
-                    Text(
-                      'No stock history at ${location['name']}',
-                      style: Theme.of(context).textTheme.titleMedium,
-                    ),
-                    const SizedBox(height: 8),
-                    const Text('Stock changes will appear here'),
-                  ],
-                ),
-              );
-            },
-          );
-        }
-
-        return ListView.builder(
-          itemCount: snapshot.data!.docs.length,
-          itemBuilder: (context, index) {
-            final doc = snapshot.data!.docs[index];
-            final data = doc.data() as Map<String, dynamic>;
-            final timestamp = (data['timestamp'] as Timestamp).toDate();
-
-            return FutureBuilder(
-              future: Future.wait([
-                FirebaseFirestore.instance
-                    .collection('products')
-                    .doc(data['productId'])
-                    .get(),
-                FirebaseFirestore.instance
-                    .collection('users')
-                    .doc(data['adminId'])
-                    .get(),
-              ]),
-              builder: (context, AsyncSnapshot<List<DocumentSnapshot>> snap) {
-                if (snap.connectionState == ConnectionState.waiting) {
-                  return const ListTile(
-                    leading: CircularProgressIndicator(),
-                    title: Text('Loading history details...'),
-                  );
-                }
-
-                final product = snap.data?[0].exists ?? false
-                    ? Product.fromFirestore(snap.data![0])
-                    : null;
-                final admin = snap.data?[1].exists ?? false
-                    ? snap.data![1].data() as Map<String, dynamic>
-                    : null;
-
-                return Card(
-                  margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  child: ListTile(
-                    leading: FutureBuilder<DocumentSnapshot>(
-                      future: FirebaseFirestore.instance
-                          .collection('products')
-                          .doc(data['productId'])
-                          .get(),
-                      builder: (context, productSnapshot) {
-                        if (productSnapshot.connectionState == ConnectionState.waiting) {
-                          return const SizedBox(
-                            width: 50,
-                            height: 50,
-                            child: CircularProgressIndicator(),
-                          );
-                        }
-                        
-                        if (!productSnapshot.hasData || !productSnapshot.data!.exists) {
-                          return const Icon(Icons.error, color: Colors.red);
-                        }
-
-                        final product = Product.fromFirestore(productSnapshot.data!);
-                        return product.imageUrl != null
-                            ? Image.network(product.imageUrl!, width: 50, height: 50)
-                            : const Icon(Icons.shopping_bag);
-                      },
-                    ),
-                    title: FutureBuilder<DocumentSnapshot>(
-                      future: FirebaseFirestore.instance
-                          .collection('products')
-                          .doc(data['productId'])
-                          .get(),
-                      builder: (context, productSnapshot) {
-                        if (productSnapshot.connectionState == ConnectionState.waiting) {
-                          return const Text('Loading product...');
-                        }
-                        
-                        if (!productSnapshot.hasData || !productSnapshot.data!.exists) {
-                          return Text('Product ID: ${data['productId']}');
-                        }
-
-                        final product = Product.fromFirestore(productSnapshot.data!);
-                        return Text(product.name);
-                      },
-                    ),
-                    subtitle: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('Quantity: ${data['quantity']}'),
-                        if (admin != null)
-                          Text('Updated by: ${admin['email']}'),
-                        Text(
-                          DateFormat('MMM dd, yyyy - HH:mm').format(timestamp),
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
-                      ],
-                    ),
-                    trailing: Icon(
-                      (data['quantity'] as int) > 0 ? Icons.add : Icons.remove,
-                      color: (data['quantity'] as int) > 0 ? Colors.green : Colors.red,
-                    ),
-                  ),
-                );
-              },
-            );
-          },
-        );
-      },
-    );
   }
 }
 
@@ -5055,8 +5285,8 @@ class DiscountBadge extends StatelessWidget {
             ),
           ),
           Text(
-            'Valide: ${discount.startDate.day}/${discount.startDate.month} '
-            '- ${discount.endDate.day}/${discount.endDate.month}',
+            'Valide: ${discount.startDate?.day}/${discount.startDate?.month} '
+            '- ${discount.endDate?.day}/${discount.endDate?.month}',
             style: const TextStyle(fontSize: 10),
           ),
         ],
