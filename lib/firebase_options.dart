@@ -64,7 +64,7 @@ class DefaultFirebaseOptions {
     messagingSenderId: '841065984080',
     projectId: 'salesgo-49e56',
     storageBucket: 'salesgo-49e56.firebasestorage.app',
-    iosBundleId: 'net.icloudsolutions.salesgo',
+    iosBundleId: 'com.example.salesgo',
   );
 
   static const FirebaseOptions macos = FirebaseOptions(
@@ -73,7 +73,7 @@ class DefaultFirebaseOptions {
     messagingSenderId: '841065984080',
     projectId: 'salesgo-49e56',
     storageBucket: 'salesgo-49e56.firebasestorage.app',
-    iosBundleId: 'net.icloudsolutions.salesgo',
+    iosBundleId: 'com.example.salesgo',
   );
 
   static const FirebaseOptions windows = FirebaseOptions(
@@ -85,4 +85,5 @@ class DefaultFirebaseOptions {
     storageBucket: 'salesgo-49e56.firebasestorage.app',
     measurementId: 'G-ESP4M4W4W9',
   );
+
 }
