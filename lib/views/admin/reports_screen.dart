@@ -602,4 +602,12 @@ class _ReportsScreenState extends State<ReportsScreen> {
                 ),
     );
   }
+    void _handleError(String message) {
+    debugPrint(message);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message)),
+      );
+    }
+  }
 }
