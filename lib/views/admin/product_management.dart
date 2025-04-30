@@ -666,6 +666,48 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
     );
   }
 
+  Widget _buildProductListTile(Product product, String docId) {
+    return FutureBuilder<DocumentSnapshot>(
+      future: product.categoryRef.get(),
+      builder: (context, categorySnapshot) {
+        if (!categorySnapshot.hasData) {
+          return ListTile(
+            leading: product.imageUrl != null 
+                ? Image.network(product.imageUrl!, width: 50, height: 50)
+                : const Icon(Icons.shopping_bag),
+            title: Text(product.name),
+            subtitle: Text('€${product.price} - Loading category...'),
+          );
+        }
+
+        final categoryDoc = categorySnapshot.data!;
+        final categoryName = categoryDoc.exists ? categoryDoc['name'] ?? 'Unknown' : 'Unknown';
+
+        return ListTile(
+          leading: product.imageUrl != null 
+              ? Image.network(product.imageUrl!, width: 50, height: 50)
+              : const Icon(Icons.shopping_bag),
+          title: Text(product.name),
+          subtitle: Text('€${product.price} - $categoryName'),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                icon: const Icon(Icons.edit),
+                onPressed: () => _editProduct(product),
+              ),
+              IconButton(
+                icon: const Icon(Icons.delete),
+                onPressed: () => _deleteProduct(docId),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+
   Widget _buildProductsTab() {
     return Padding(
       padding: const EdgeInsets.all(16.0),
@@ -680,44 +722,7 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
             itemBuilder: (context, index) {
               final doc = snapshot.data!.docs[index];
               final product = Product.fromFirestore(doc);
-              
-              return FutureBuilder<DocumentSnapshot>(
-                future: product.categoryRef.get(),
-                builder: (context, categorySnapshot) {
-                  if (!categorySnapshot.hasData) {
-                    return ListTile(
-                      leading: product.imageUrl != null 
-                          ? Image.network(product.imageUrl!, width: 50, height: 50)
-                          : const Icon(Icons.shopping_bag),
-                      title: Text(product.name),
-                      subtitle: Text('€${product.price} - Loading category...'),
-                    );
-                  }
-                  
-                  final categoryName = categorySnapshot.data!['name'] ?? 'Unknown';
-                  
-                  return ListTile(
-                    leading: product.imageUrl != null 
-                        ? Image.network(product.imageUrl!, width: 50, height: 50)
-                        : const Icon(Icons.shopping_bag),
-                    title: Text(product.name),
-                    subtitle: Text('€${product.price} - $categoryName'),
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        IconButton(
-                          icon: const Icon(Icons.edit),
-                          onPressed: () => _editProduct(product),
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.delete),
-                          onPressed: () => _deleteProduct(doc.id),
-                        ),
-                      ],
-                    ),
-                  );
-                },
-              );
+              return _buildProductListTile(product, doc.id);
             },
           );
         },
@@ -791,10 +796,10 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
               return FutureBuilder<DocumentSnapshot>(
                 future: discount.categoryRef.get(),
                 builder: (context, categorySnapshot) {
-                  final categoryName = categorySnapshot.hasData
-                      ? categorySnapshot.data!.get('name') ?? 'Unknown Category'
-                      : 'Loading...';
-
+                  final categoryDoc = categorySnapshot.data;
+                  final categoryName = categoryDoc != null && categoryDoc.exists
+                      ? categoryDoc.get('name') ?? 'Unknown Category'
+                      : 'Unknown Category';
                   return Card(
                     margin: const EdgeInsets.symmetric(vertical: 8),
                     child: ListTile(
@@ -885,15 +890,19 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
                 builder: (context, snapshot) {
                   if (!snapshot.hasData) return const SizedBox();
                   
-                  final categories = snapshot.data!.docs.map((doc) {
+                  final categoryDocs = snapshot.data!.docs;
+
+                  final categories = categoryDocs.map((doc) {
                     return DropdownMenuItem<String>(
                       value: doc.id,
                       child: Text(doc['name']),
                     );
                   }).toList();
-                  
+
+                  final isValidValue = categoryDocs.any((doc) => doc.id == _selectedProductCategory);
+
                   return DropdownButtonFormField<String>(
-                    value: _selectedProductCategory,
+                    value: isValidValue ? _selectedProductCategory : null,
                     decoration: const InputDecoration(labelText: 'Category'),
                     items: categories,
                     onChanged: (value) {
@@ -1006,25 +1015,27 @@ Widget _buildDiscountForm({bool isEditing = false, String? discountId}) {
                 builder: (context, snapshot) {
                   if (!snapshot.hasData) return const SizedBox();
                   
-                  final categories = snapshot.data!.docs.map((doc) {
+                  final categoryItems = snapshot.data!.docs.map((doc) {
                     return DropdownMenuItem<String>(
-                      value: doc.id,  // Use document ID instead of name
+                      value: doc.id,
                       child: Text(doc['name']),
                     );
                   }).toList();
-                  
+
+                  final isValidValue = snapshot.data!.docs.any((doc) => doc.id == _selectedDiscountCategory);
+
                   return DropdownButtonFormField<String>(
-                    value: _selectedDiscountCategory,
+                    value: isValidValue ? _selectedDiscountCategory : null,
                     decoration: const InputDecoration(labelText: 'Category'),
-                    items: categories,
+                    items: categoryItems,
                     onChanged: (value) {
                       setDialogState(() {
                         _selectedDiscountCategory = value;
                       });
                     },
                     validator: (value) => value == null ? 'Please select a category' : null,
-                    );
-                  },
+                  );
+                },
                 ),
                 const SizedBox(height: 10),
                 SwitchListTile(
