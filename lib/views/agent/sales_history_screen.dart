@@ -285,163 +285,163 @@ class _HistoryScreenState extends State<HistoryScreen> {
     );
   }
 
-Widget _buildGroupedByCategory(List<Sale> sales) {
-  final categoryGroups = <String, CategorySalesData>{};
-  
-  // Group sales by category
-  for (final sale in sales) {
-    final categoryQuantities = <String, int>{};
-    final categoryAmounts = <String, double>{};
-    final productsByCategory = <String, Product>{};
+  Widget _buildGroupedByCategory(List<Sale> sales) {
+    final categoryGroups = <String, CategorySalesData>{};
+    
+    // Group sales by category
+    for (final sale in sales) {
+      final categoryQuantities = <String, int>{};
+      final categoryAmounts = <String, double>{};
+      final productsByCategory = <String, Product>{};
 
-    for (final product in sale.products) {
-      final categoryId = product.categoryRef.id;
+      for (final product in sale.products) {
+        final categoryId = product.categoryRef.id;
 
-      categoryQuantities.update(categoryId, (value) => value + 1, ifAbsent: () => 1);
-      categoryAmounts.update(categoryId, (value) => value + product.price, ifAbsent: () => product.price);
-      
-      // Sauvegarder un produit par catégorie pour le prix (on peut en prendre un arbitraire)
-      productsByCategory[categoryId] = product;
+        categoryQuantities.update(categoryId, (value) => value + 1, ifAbsent: () => 1);
+        categoryAmounts.update(categoryId, (value) => value + product.price, ifAbsent: () => product.price);
+        
+        // Sauvegarder un produit par catégorie pour le prix (on peut en prendre un arbitraire)
+        productsByCategory[categoryId] = product;
+      }
+
+      for (final categoryId in categoryQuantities.keys) {
+        categoryGroups.putIfAbsent(categoryId, () => CategorySalesData(
+          categoryId: categoryId,
+          sales: [],
+        ));
+
+        categoryGroups[categoryId]!.sales.add(sale);
+        categoryGroups[categoryId]!.totalQuantity += categoryQuantities[categoryId]!;
+        categoryGroups[categoryId]!.totalAmount += categoryAmounts[categoryId]!;
+      }
     }
 
-    for (final categoryId in categoryQuantities.keys) {
-      categoryGroups.putIfAbsent(categoryId, () => CategorySalesData(
-        categoryId: categoryId,
-        sales: [],
-      ));
 
-      categoryGroups[categoryId]!.sales.add(sale);
-      categoryGroups[categoryId]!.totalQuantity += categoryQuantities[categoryId]!;
-      categoryGroups[categoryId]!.totalAmount += categoryAmounts[categoryId]!;
-    }
-  }
+    return ListView(
+      children: categoryGroups.entries.map((entry) {
+        final data = entry.value;
+        
+        return FutureBuilder<DocumentSnapshot>(
+          future: data.categoryId.contains('/')
+              ? FirebaseFirestore.instance.doc(data.categoryId).get()
+              : FirebaseFirestore.instance.collection('categories').doc(data.categoryId).get(),
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const ListTile(
+                leading: Icon(Icons.category),
+                title: Text('Loading...'),
+              );
+            }
 
+            String categoryName = 'Uncategorized';
+            if (snapshot.hasData && snapshot.data!.exists) {
+              categoryName = snapshot.data!.get('name') ?? 'Uncategorized';
+            }
 
-  return ListView(
-    children: categoryGroups.entries.map((entry) {
-      final data = entry.value;
-      
-      return FutureBuilder<DocumentSnapshot>(
-        future: data.categoryId.contains('/')
-            ? FirebaseFirestore.instance.doc(data.categoryId).get()
-            : FirebaseFirestore.instance.collection('categories').doc(data.categoryId).get(),
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const ListTile(
-              leading: Icon(Icons.category),
-              title: Text('Loading...'),
-            );
-          }
-
-          String categoryName = 'Uncategorized';
-          if (snapshot.hasData && snapshot.data!.exists) {
-            categoryName = snapshot.data!.get('name') ?? 'Uncategorized';
-          }
-
-          return ExpansionTile(
-            leading: const Icon(Icons.category),
-            title: Text(categoryName),
-            subtitle: Text(
-              '${data.totalQuantity} items - Total: €${data.totalAmount.toStringAsFixed(2)}',
-            ),
-            children: [
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Top products:',
-                      style: TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 8),
-                    FutureBuilder<List<Product>>(
-                      future: _getTopProductsInCategory(sales, data.categoryId),
-                      builder: (context, productSnapshot) {
-                        if (!productSnapshot.hasData) {
-                          return const Center(child: CircularProgressIndicator());
-                        }
-                        return Column(
-                          children: productSnapshot.data!.take(3).map((product) {
-                            return ListTile(
-                              contentPadding: EdgeInsets.zero,
-                              leading: product.imageUrl != null
-                                  ? Image.network(
-                                      product.imageUrl!,
-                                      width: 40,
-                                      height: 40,
-                                    )
-                                  : const Icon(Icons.shopping_bag),
-                              title: Text(product.name),
-                              subtitle: Text('€${product.price.toStringAsFixed(2)}'),
-                            );
-                          }).toList(),
-                        );
-                      },
-                    ),
-                    const SizedBox(height: 16),
-                    const Text(
-                      'Recent sales:',
-                      style: TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                    ...data.sales.take(3).map((sale) {
-                      final quantityInCategory = sale.products
-                          .where((p) => p.categoryRef.id == data.categoryId)
-                          .length;
-                      final amountInCategory = sale.products
-                          .where((p) => p.categoryRef.id == data.categoryId)
-                          .fold(0.0, (sum, p) => sum + p.price);
-                      
-                      return ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        title: Text('Sale #${sale.id.substring(0, 6)}'),
-                        subtitle: Text(
-                          DateFormat('MMM dd, HH:mm').format(sale.date),
-                        ),
-                        trailing: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text('$quantityInCategory items'),
-                            Text('€${amountInCategory.toStringAsFixed(2)}'),
-                          ],
-                        ),
-                      );
-                    }).toList(),
-                    if (data.sales.length > 3)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 8.0),
-                        child: Text(
-                          '+ ${data.sales.length - 3} more transactions',
-                          style: TextStyle(color: Colors.grey[600]),
-                        ),
-                      ),
-                  ],
-                ),
+            return ExpansionTile(
+              leading: const Icon(Icons.category),
+              title: Text(categoryName),
+              subtitle: Text(
+                '${data.totalQuantity} items - Total: €${data.totalAmount.toStringAsFixed(2)}',
               ),
-            ],
-          );
-        },
-      );
-    }).toList(),
-  );
+              children: [
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Top products:',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 8),
+                      FutureBuilder<List<Product>>(
+                        future: _getTopProductsInCategory(sales, data.categoryId),
+                        builder: (context, productSnapshot) {
+                          if (!productSnapshot.hasData) {
+                            return const Center(child: CircularProgressIndicator());
+                          }
+                          return Column(
+                            children: productSnapshot.data!.take(3).map((product) {
+                              return ListTile(
+                                contentPadding: EdgeInsets.zero,
+                                leading: product.imageUrl != null
+                                    ? Image.network(
+                                        product.imageUrl!,
+                                        width: 40,
+                                        height: 40,
+                                      )
+                                    : const Icon(Icons.shopping_bag),
+                                title: Text(product.name),
+                                subtitle: Text('€${product.price.toStringAsFixed(2)}'),
+                              );
+                            }).toList(),
+                          );
+                        },
+                      ),
+                      const SizedBox(height: 16),
+                      const Text(
+                        'Recent sales:',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      ...data.sales.take(3).map((sale) {
+                        final quantityInCategory = sale.products
+                            .where((p) => p.categoryRef.id == data.categoryId)
+                            .length;
+                        final amountInCategory = sale.products
+                            .where((p) => p.categoryRef.id == data.categoryId)
+                            .fold(0.0, (sum, p) => sum + p.price);
+                        
+                        return ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: Text('Sale #${sale.id.substring(0, 6)}'),
+                          subtitle: Text(
+                            DateFormat('MMM dd, HH:mm').format(sale.date),
+                          ),
+                          trailing: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text('$quantityInCategory items'),
+                              Text('€${amountInCategory.toStringAsFixed(2)}'),
+                            ],
+                          ),
+                        );
+                      }).toList(),
+                      if (data.sales.length > 3)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 8.0),
+                          child: Text(
+                            '+ ${data.sales.length - 3} more transactions',
+                            style: TextStyle(color: Colors.grey[600]),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+            );
+          },
+        );
+      }).toList(),
+    );
 
-}
-
-Future<List<Product>> _getTopProductsInCategory(List<Sale> sales, String categoryId) async {
-  final productCounts = <Product, int>{};
-  
-  for (final sale in sales) {
-    for (final product in sale.products.where((p) => p.categoryRef.id == categoryId)) {
-      productCounts[product] = (productCounts[product] ?? 0) + 1;
-    }
   }
-  
-  // Sort products by count in descending order
-  final sortedProducts = productCounts.entries.toList()
-    ..sort((a, b) => b.value.compareTo(a.value));
-  
-  return sortedProducts.map((entry) => entry.key).toList();
-}
+
+  Future<List<Product>> _getTopProductsInCategory(List<Sale> sales, String categoryId) async {
+    final productCounts = <Product, int>{};
+    
+    for (final sale in sales) {
+      for (final product in sale.products.where((p) => p.categoryRef.id == categoryId)) {
+        productCounts[product] = (productCounts[product] ?? 0) + 1;
+      }
+    }
+    
+    // Sort products by count in descending order
+    final sortedProducts = productCounts.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    
+    return sortedProducts.map((entry) => entry.key).toList();
+  }
 
   Widget _buildGroupedByDiscount(List<Sale> sales) {
     final discountGroups = <String, DiscountSalesData>{};

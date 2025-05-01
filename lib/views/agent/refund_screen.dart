@@ -5,6 +5,7 @@ import 'package:salesgo/services/firestore_service.dart';
 import 'package:salesgo/viewmodels/auth_vm.dart';
 import 'package:salesgo/viewmodels/refund_vm.dart';
 import 'package:salesgo/widgets/product_details_card.dart';
+import 'package:salesgo/widgets/refund_product_card.dart';
 
 class RefundScreen extends StatefulWidget {
   const RefundScreen({super.key});
@@ -49,7 +50,7 @@ class _RefundScreenState extends State<RefundScreen> {
               Expanded(
                 child: ListView.builder(
                   itemCount: refundVM.refundItems.length,
-                  itemBuilder: (context, index) => ProductDetailsCard(
+                  itemBuilder: (context, index) => RefundProductCard(
                     product: refundVM.refundItems[index],
                     onRemove: () {
                       refundVM.removeFromRefund(index);

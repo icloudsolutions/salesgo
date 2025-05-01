@@ -2,40 +2,35 @@ import 'package:flutter/material.dart';
 import 'package:salesgo/models/discount.dart';
 import 'package:salesgo/models/product.dart';
 import 'package:salesgo/models/sale.dart';
+import 'package:salesgo/models/cart_item.dart';
 import 'package:salesgo/services/firestore_service.dart';
 import 'package:uuid/uuid.dart';
 
 class SalesViewModel with ChangeNotifier {
-  final List<Product> _cartItems = [];
+  final List<CartItem> _cartItems = [];
   final FirestoreService _firestoreService;
   final Uuid _uuid = const Uuid();
-  final Map<String, Discount?> _selectedDiscounts = {};
 
   SalesViewModel({required FirestoreService firestoreService})
       : _firestoreService = firestoreService;
 
-  List<Product> get cartItems => List.unmodifiable(_cartItems);
+  // 🔒 Accès externe en lecture seule
+  List<CartItem> get cartItems => List.unmodifiable(_cartItems);
 
+  // 💲 Total des prix avec remises appliquées
   double get totalAmount => _calculateTotal();
 
-  // Select a discount for a specific product
-  void selectDiscountForProduct(String productId, Discount? discount) {
-    _selectedDiscounts[productId] = discount;
-    notifyListeners();
-  }
-
-  // Get selected discount for a product
-  Discount? getSelectedDiscountForProduct(String productId) {
-    return _selectedDiscounts[productId];
-  }
-
-  // Add product to cart
+  // ➕ Ajouter une ligne produit unique au panier
   void addToCart(Product product) {
-    _cartItems.add(product);
+    final cartItem = CartItem(
+      id: _uuid.v4(),
+      product: product,
+    );
+    _cartItems.add(cartItem);
     notifyListeners();
   }
 
-  // Remove product from cart
+  // ➖ Supprimer une ligne du panier
   void removeFromCart(int index) {
     if (index >= 0 && index < _cartItems.length) {
       _cartItems.removeAt(index);
@@ -43,68 +38,99 @@ class SalesViewModel with ChangeNotifier {
     }
   }
 
-  // Confirm and save the sale
+  // 🎯 Appliquer une remise à une ligne spécifique
+  void selectDiscountForCartItem(String cartItemId, Discount? discount) {
+    try {
+      final cartItem = _cartItems.firstWhere((item) => item.id == cartItemId);
+      cartItem.discount = discount;
+      notifyListeners();
+    } catch (_) {
+      // CartItem introuvable : rien à faire
+    }
+  }
+
+  // 📌 Obtenir la remise d'une ligne spécifique
+  Discount? getSelectedDiscountForCartItem(String cartItemId) {
+    try {
+      return _cartItems.firstWhere((item) => item.id == cartItemId).discount;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // 💾 Confirmer la vente et enregistrer dans Firestore
   Future<void> confirmSale({
     required String paymentMethod,
     required String agentId,
-    required String locationId, // 🔥 locationId now required
+    required String locationId,
     String? couponCode,
   }) async {
-    try {
-      if (_cartItems.isEmpty) {
-        throw Exception('Cannot confirm sale with an empty cart.');
-      }
+    if (_cartItems.isEmpty) {
+      throw Exception('Cannot confirm sale with an empty cart.');
+    }
 
-      // Apply discounts if any
-      final discountedProducts = _cartItems.map((product) {
-        final discount = _selectedDiscounts[product.id];
-        if (discount != null) {
-          return Product(
-            id: product.id,
-            name: product.name,
-            price: _calculatePriceWithDiscount(product.price, discount),
-            categoryRef: product.categoryRef,
-            barcode: product.barcode,
-            imageUrl: product.imageUrl,
-          );
-        }
-        return product;
+    try {
+      final discountedProducts = _cartItems.map((item) {
+        final discount = item.discount;
+        final finalPrice = discount != null
+            ? _calculatePriceWithDiscount(item.product.price, discount)
+            : item.product.price;
+
+        return Product(
+          id: item.product.id,
+          name: item.product.name,
+          price: finalPrice,
+          categoryRef: item.product.categoryRef,
+          barcode: item.product.barcode,
+          imageUrl: item.product.imageUrl,
+        );
       }).toList();
+
+      final total = discountedProducts.fold(
+        0.0,
+        (sum, product) => sum + (product.price ?? 0),
+      );
 
       final sale = Sale(
         id: _uuid.v4(),
         agentId: agentId,
-        locationId: locationId, // 🔥 set correctly here
+        locationId: locationId,
         date: DateTime.now(),
         products: discountedProducts,
-        totalAmount: discountedProducts.fold(0, (sum, item) => sum + item.price),
+        totalAmount: total,
         paymentMethod: paymentMethod,
         couponCode: couponCode,
       );
 
       await _firestoreService.recordSale(sale);
       clearCart();
-      _selectedDiscounts.clear(); // Clear applied discounts after sale
     } catch (e) {
       debugPrint('Error confirming sale: $e');
       rethrow;
     }
   }
 
-  // Clear the cart
+  // 🧹 Vider le panier
   void clearCart() {
     _cartItems.clear();
     notifyListeners();
   }
 
-  // Calculate the total price
+  // 🧮 Calcul du total avec remises
   double _calculateTotal() {
-    return _cartItems.fold(0, (sum, item) => sum + (item.price ?? 0));
+    return _cartItems.fold(0.0, (sum, item) {
+      final discount = item.discount;
+      final basePrice = item.product.price;
+      final price = discount != null
+          ? _calculatePriceWithDiscount(basePrice, discount)
+          : basePrice;
+      return sum + (price ?? 0);
+    });
   }
 
-  // Calculate price after applying discount
+  // 📉 Appliquer une remise à un prix
   double _calculatePriceWithDiscount(double basePrice, Discount discount) {
-    return discount.type == '%' 
+    return discount.type == '%'
         ? basePrice * (1 - discount.value / 100)
         : basePrice - discount.value;
   }

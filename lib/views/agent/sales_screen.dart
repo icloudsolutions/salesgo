@@ -8,6 +8,7 @@ import 'package:salesgo/widgets/product_details_card.dart';
 import 'package:salesgo/widgets/payment_section.dart';
 import 'package:salesgo/views/agent/sales_history_screen.dart';
 import 'package:salesgo/viewmodels/refund_vm.dart';
+import 'package:salesgo/widgets/refund_product_card.dart';
 
 class SalesScreen extends StatefulWidget {
   const SalesScreen({super.key});
@@ -120,7 +121,7 @@ class _SalesScreenState extends State<SalesScreen> with SingleTickerProviderStat
                 child: ListView.builder(
                   itemCount: salesVM.cartItems.length,
                   itemBuilder: (context, index) => ProductDetailsCard(
-                    product: salesVM.cartItems[index],
+                    cartItem: salesVM.cartItems[index],
                     onRemove: () {
                       salesVM.removeFromCart(index);
                       if (salesVM.cartItems.isEmpty) {
@@ -204,12 +205,13 @@ class _SalesScreenState extends State<SalesScreen> with SingleTickerProviderStat
                 Expanded(
                   child: ListView.builder(
                     itemCount: refundVM.refundItems.length,
-                    itemBuilder: (context, index) => ProductDetailsCard(
+                    itemBuilder: (context, index) => RefundProductCard(
                       product: refundVM.refundItems[index],
                       onRemove: () => refundVM.removeFromRefund(index),
                     ),
                   ),
                 ),
+
                 // Refund summary and action buttons
                 Padding(
                   padding: const EdgeInsets.all(16.0),
