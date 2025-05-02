@@ -1,29 +1,27 @@
 # ios/Podfile
-
 platform :ios, '13.0'
 
-ENV['COCOAPODS_DISABLE_STATS'] = 'true'
+# Fait fonctionner Flipper (outil de debug) si vous l’activez dans flutter
+# Désactivez-le si vous ne l’utilisez pas
+ENV['FLUTTER_FRAMEWORK_DIR'] ||= File.join(__dir__, '..', 'flutter', 'bin', 'cache', 'artifacts', 'engine', 'ios')
 
-project 'Runner', {
-  'Debug' => :debug,
-  'Profile' => :release,
-  'Release' => :release,
-}
-
-def flutter_installation
-  flutter_root = File.expand_path(File.join('..', 'flutter'))
-  unless File.exist?(File.join(flutter_root, 'packages', 'flutter_tools', 'bin', 'podhelper.rb'))
-    raise "#{flutter_root}/packages/flutter_tools/bin/podhelper.rb must exist. If you're running pod install manually, make sure flutter is installed first."
-  end
-  require File.expand_path(File.join('..', '.flutter-plugins-dependencies'))
-  require File.expand_path(File.join('..', 'packages', 'flutter_tools', 'bin', 'podhelper.rb'))
-end
-
-require File.expand_path(File.join('..', 'packages', 'flutter_tools', 'bin', 'podhelper.rb'))
-
-flutter_application_path = File.expand_path('..')
-load File.join(flutter_application_path, '.ios', 'Flutter', 'podhelper.rb')
+# Utilisé par Codemagic et Flutter
+require_relative '../.flutter-plugins'
+require_relative '../.flutter-plugins-dependencies'
 
 target 'Runner' do
+  use_frameworks!
+  use_modular_headers!
+
   flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
+end
+
+# Post install : règle les problèmes liés à Xcode 14+
+post_install do |installer|
+  installer.pods_project.targets.each do |target|
+    flutter_additional_ios_build_settings(target)
+    target.build_configurations.each do |config|
+      config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '12.0'
+    end
+  end
 end
