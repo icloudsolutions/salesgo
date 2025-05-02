@@ -1,11 +1,29 @@
+# ios/Podfile
+
 platform :ios, '13.0'
 
-# ignore toutes les architectures simulées pour éviter les erreurs
-install! 'cocoapods', :deterministic_uuids => false
+ENV['COCOAPODS_DISABLE_STATS'] = 'true'
+
+project 'Runner', {
+  'Debug' => :debug,
+  'Profile' => :release,
+  'Release' => :release,
+}
+
+def flutter_installation
+  flutter_root = File.expand_path(File.join('..', 'flutter'))
+  unless File.exist?(File.join(flutter_root, 'packages', 'flutter_tools', 'bin', 'podhelper.rb'))
+    raise "#{flutter_root}/packages/flutter_tools/bin/podhelper.rb must exist. If you're running pod install manually, make sure flutter is installed first."
+  end
+  require File.expand_path(File.join('..', '.flutter-plugins-dependencies'))
+  require File.expand_path(File.join('..', 'packages', 'flutter_tools', 'bin', 'podhelper.rb'))
+end
+
+require File.expand_path(File.join('..', 'packages', 'flutter_tools', 'bin', 'podhelper.rb'))
+
+flutter_application_path = File.expand_path('..')
+load File.join(flutter_application_path, '.ios', 'Flutter', 'podhelper.rb')
 
 target 'Runner' do
-  use_frameworks!
-  use_modular_headers!
-
   flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
 end
