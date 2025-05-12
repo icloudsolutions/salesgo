@@ -3,12 +3,14 @@ lib/
 ├── firebase_options.dart
 ├── main.dart
 ├── models/
+│   ├── cart_item.dart
 │   ├── category.dart
 │   ├── coupon.dart
 │   ├── discount.dart
 │   ├── location.dart
 │   ├── product.dart
 │   ├── sale.dart
+│   ├── sales_chart_data.dart
 │   └── user.dart
 ├── routes.dart
 ├── services/
@@ -27,13 +29,14 @@ lib/
 │   │   ├── admin_home_screen.dart
 │   │   ├── location_management.dart
 │   │   ├── product_management.dart
+│   │   ├── reports_screen copy.dart
 │   │   ├── reports_screen.dart
 │   │   ├── stock_management.dart
 │   │   └── users_management.dart
 │   ├── agent/
 │   │   ├── agent_home_screen.dart
-│   │   ├── history_screen.dart
 │   │   ├── refund_screen.dart
+│   │   ├── sales_history_screen.dart
 │   │   ├── sales_screen.dart
 │   │   └── stock_screen.dart
 │   ├── login_screen.dart
@@ -42,6 +45,7 @@ lib/
     ├── discount_badge.dart
     ├── payment_section.dart
     ├── product_details_card.dart
+    ├── refund_product_card.dart
     ├── role_based_ui.dart
     └── sale_item.dart
 
@@ -52,7 +56,7 @@ import 'package:flutter/material.dart';
 import 'package:salesgo/views/admin/admin_home_screen.dart';
 import 'package:salesgo/views/admin/users_management.dart';
 import 'package:salesgo/views/agent/agent_home_screen.dart';
-import 'package:salesgo/views/agent/history_screen.dart';
+import 'package:salesgo/views/agent/sales_history_screen.dart';
 import 'package:salesgo/views/agent/stock_screen.dart';
 import 'package:salesgo/views/login_screen.dart';
 import 'widgets/role_based_ui.dart';
@@ -148,7 +152,7 @@ class DefaultFirebaseOptions {
     messagingSenderId: '841065984080',
     projectId: 'salesgo-49e56',
     storageBucket: 'salesgo-49e56.firebasestorage.app',
-    iosBundleId: 'net.icloudsolutions.salesgo',
+    iosBundleId: 'com.example.salesgo',
   );
 
   static const FirebaseOptions macos = FirebaseOptions(
@@ -157,7 +161,7 @@ class DefaultFirebaseOptions {
     messagingSenderId: '841065984080',
     projectId: 'salesgo-49e56',
     storageBucket: 'salesgo-49e56.firebasestorage.app',
-    iosBundleId: 'net.icloudsolutions.salesgo',
+    iosBundleId: 'com.example.salesgo',
   );
 
   static const FirebaseOptions windows = FirebaseOptions(
@@ -169,8 +173,8 @@ class DefaultFirebaseOptions {
     storageBucket: 'salesgo-49e56.firebasestorage.app',
     measurementId: 'G-ESP4M4W4W9',
   );
-}
 
+}
 
 main.dart:
 
@@ -186,7 +190,7 @@ import 'package:salesgo/viewmodels/stock_vm.dart';
 import 'package:salesgo/views/admin/admin_home_screen.dart';
 import 'package:salesgo/views/admin/users_management.dart';
 import 'package:salesgo/views/agent/agent_home_screen.dart';
-import 'package:salesgo/views/agent/history_screen.dart';
+import 'package:salesgo/views/agent/sales_history_screen.dart';
 import 'package:salesgo/views/agent/stock_screen.dart';
 import 'package:salesgo/views/signup_screen.dart';
 import 'package:salesgo/widgets/role_based_ui.dart';
@@ -272,7 +276,7 @@ import 'package:salesgo/views/admin/reports_screen.dart';
 
 import 'views/admin/admin_home_screen.dart';
 import 'views/agent/agent_home_screen.dart';
-import 'views/agent/history_screen.dart';
+import 'views/agent/sales_history_screen.dart';
 import 'views/agent/stock_screen.dart';
 import 'views/admin/users_management.dart';
 
@@ -285,6 +289,26 @@ final appRoutes = {
   '/reports': (context) => const ReportsScreen(),
 
 };
+
+models\cart_item.dart:
+
+# models\cart_item.dart
+import 'package:salesgo/models/discount.dart';
+import 'package:salesgo/models/product.dart';
+
+
+class CartItem {
+  final String id;
+  final Product product;
+  Discount? discount;
+
+  CartItem({
+    required this.id,
+    required this.product,
+    this.discount,
+  });
+}
+
 
 models\category.dart:
 
@@ -593,6 +617,25 @@ class Sale {
 
 }
 
+models\sales_chart_data.dart:
+
+# models\sales_chart_data.dart
+class SalesChartData {
+  final String periodKey;
+  final String agentName;
+  final double amount;
+  final int xIndex;
+
+  SalesChartData({
+    required this.periodKey,
+    required this.agentName,
+    required this.amount,
+    required this.xIndex,
+  });
+
+  String get key => '${periodKey}_$agentName';
+}
+
 models\user.dart:
 
 # models\user.dart
@@ -693,7 +736,7 @@ class FirebaseAuthService implements AuthService {
       );
       
       // Create user document in Firestore
-      await _createUserDocument(userCredential.user!);
+      await _createUserDocument(userCredential.user!, name, role);
       
       return userCredential.user;
     } on FirebaseAuthException catch (e) {
@@ -701,17 +744,16 @@ class FirebaseAuthService implements AuthService {
     }
   }
 
-  Future<void> _createUserDocument(User user) async {
-    await FirebaseFirestore.instance
-        .collection('users')
-        .doc(user.uid)
-        .set({
-          'uid': user.uid,
-          'email': user.email,
-          'role': 'agent', // Default role
-          'createdAt': FieldValue.serverTimestamp(),
-        });
+  Future<void> _createUserDocument(User user, String name, String role) async {
+    await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
+      'uid': user.uid,
+      'email': user.email,
+      'role': role,
+      'name': name,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
   }
+
 
   @override
   Future<void> signOut() => _auth.signOut();
@@ -1285,40 +1327,35 @@ import 'package:flutter/material.dart';
 import 'package:salesgo/models/discount.dart';
 import 'package:salesgo/models/product.dart';
 import 'package:salesgo/models/sale.dart';
+import 'package:salesgo/models/cart_item.dart';
 import 'package:salesgo/services/firestore_service.dart';
 import 'package:uuid/uuid.dart';
 
 class SalesViewModel with ChangeNotifier {
-  final List<Product> _cartItems = [];
+  final List<CartItem> _cartItems = [];
   final FirestoreService _firestoreService;
   final Uuid _uuid = const Uuid();
-  final Map<String, Discount?> _selectedDiscounts = {};
 
   SalesViewModel({required FirestoreService firestoreService})
       : _firestoreService = firestoreService;
 
-  List<Product> get cartItems => List.unmodifiable(_cartItems);
+  // 🔒 Accès externe en lecture seule
+  List<CartItem> get cartItems => List.unmodifiable(_cartItems);
 
+  // 💲 Total des prix avec remises appliquées
   double get totalAmount => _calculateTotal();
 
-  // Select a discount for a specific product
-  void selectDiscountForProduct(String productId, Discount? discount) {
-    _selectedDiscounts[productId] = discount;
-    notifyListeners();
-  }
-
-  // Get selected discount for a product
-  Discount? getSelectedDiscountForProduct(String productId) {
-    return _selectedDiscounts[productId];
-  }
-
-  // Add product to cart
+  // ➕ Ajouter une ligne produit unique au panier
   void addToCart(Product product) {
-    _cartItems.add(product);
+    final cartItem = CartItem(
+      id: _uuid.v4(),
+      product: product,
+    );
+    _cartItems.add(cartItem);
     notifyListeners();
   }
 
-  // Remove product from cart
+  // ➖ Supprimer une ligne du panier
   void removeFromCart(int index) {
     if (index >= 0 && index < _cartItems.length) {
       _cartItems.removeAt(index);
@@ -1326,68 +1363,99 @@ class SalesViewModel with ChangeNotifier {
     }
   }
 
-  // Confirm and save the sale
+  // 🎯 Appliquer une remise à une ligne spécifique
+  void selectDiscountForCartItem(String cartItemId, Discount? discount) {
+    try {
+      final cartItem = _cartItems.firstWhere((item) => item.id == cartItemId);
+      cartItem.discount = discount;
+      notifyListeners();
+    } catch (_) {
+      // CartItem introuvable : rien à faire
+    }
+  }
+
+  // 📌 Obtenir la remise d'une ligne spécifique
+  Discount? getSelectedDiscountForCartItem(String cartItemId) {
+    try {
+      return _cartItems.firstWhere((item) => item.id == cartItemId).discount;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // 💾 Confirmer la vente et enregistrer dans Firestore
   Future<void> confirmSale({
     required String paymentMethod,
     required String agentId,
-    required String locationId, // 🔥 locationId now required
+    required String locationId,
     String? couponCode,
   }) async {
-    try {
-      if (_cartItems.isEmpty) {
-        throw Exception('Cannot confirm sale with an empty cart.');
-      }
+    if (_cartItems.isEmpty) {
+      throw Exception('Cannot confirm sale with an empty cart.');
+    }
 
-      // Apply discounts if any
-      final discountedProducts = _cartItems.map((product) {
-        final discount = _selectedDiscounts[product.id];
-        if (discount != null) {
-          return Product(
-            id: product.id,
-            name: product.name,
-            price: _calculatePriceWithDiscount(product.price, discount),
-            categoryRef: product.categoryRef,
-            barcode: product.barcode,
-            imageUrl: product.imageUrl,
-          );
-        }
-        return product;
+    try {
+      final discountedProducts = _cartItems.map((item) {
+        final discount = item.discount;
+        final finalPrice = discount != null
+            ? _calculatePriceWithDiscount(item.product.price, discount)
+            : item.product.price;
+
+        return Product(
+          id: item.product.id,
+          name: item.product.name,
+          price: finalPrice,
+          categoryRef: item.product.categoryRef,
+          barcode: item.product.barcode,
+          imageUrl: item.product.imageUrl,
+        );
       }).toList();
+
+      final total = discountedProducts.fold(
+        0.0,
+        (sum, product) => sum + (product.price ?? 0),
+      );
 
       final sale = Sale(
         id: _uuid.v4(),
         agentId: agentId,
-        locationId: locationId, // 🔥 set correctly here
+        locationId: locationId,
         date: DateTime.now(),
         products: discountedProducts,
-        totalAmount: discountedProducts.fold(0, (sum, item) => sum + item.price),
+        totalAmount: total,
         paymentMethod: paymentMethod,
         couponCode: couponCode,
       );
 
       await _firestoreService.recordSale(sale);
       clearCart();
-      _selectedDiscounts.clear(); // Clear applied discounts after sale
     } catch (e) {
       debugPrint('Error confirming sale: $e');
       rethrow;
     }
   }
 
-  // Clear the cart
+  // 🧹 Vider le panier
   void clearCart() {
     _cartItems.clear();
     notifyListeners();
   }
 
-  // Calculate the total price
+  // 🧮 Calcul du total avec remises
   double _calculateTotal() {
-    return _cartItems.fold(0, (sum, item) => sum + (item.price ?? 0));
+    return _cartItems.fold(0.0, (sum, item) {
+      final discount = item.discount;
+      final basePrice = item.product.price;
+      final price = discount != null
+          ? _calculatePriceWithDiscount(basePrice, discount)
+          : basePrice;
+      return sum + (price ?? 0);
+    });
   }
 
-  // Calculate price after applying discount
+  // 📉 Appliquer une remise à un prix
   double _calculatePriceWithDiscount(double basePrice, Discount discount) {
-    return discount.type == '%' 
+    return discount.type == '%'
         ? basePrice * (1 - discount.value / 100)
         : basePrice - discount.value;
   }
@@ -1980,7 +2048,8 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:intl/intl.dart';
 import 'package:salesgo/models/product.dart';
 import 'package:salesgo/models/discount.dart';
-import 'package:salesgo/models/category.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 class ProductManagement extends StatefulWidget {
   const ProductManagement({super.key});
@@ -2027,7 +2096,87 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
     _discountNameController.dispose();
     _discountValueController.dispose();
     _discountTypeController.dispose();
+    _scannerController.dispose();
+
     super.dispose();
+  }
+
+  // Add to your state class
+  final MobileScannerController _scannerController = MobileScannerController();
+
+  Future<void> _scanBarcode() async {
+    try {
+      final status = await Permission.camera.request();
+      if (!status.isGranted) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Camera permission is required')),
+        );
+        return;
+      }
+
+      if (!mounted) return;
+      final barcode = await showDialog<String>(
+        context: context,
+        builder: (context) => Dialog(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: MediaQuery.of(context).size.width * 0.8,
+              maxHeight: MediaQuery.of(context).size.height * 0.6,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Text('Scan Barcode', style: Theme.of(context).textTheme.titleLarge),
+                ),
+                Expanded(
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: MobileScanner(
+                      controller: _scannerController,
+                      onDetect: (capture) {
+                        final barcodes = capture.barcodes;
+                        if (barcodes.isNotEmpty) {
+                          Navigator.pop(context, barcodes.first.rawValue);
+                        }
+                      },
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Text('Point the camera at a barcode',
+                    style: TextStyle(color: Colors.grey[600])),
+                ),
+                TextButton(
+                  onPressed: () {
+                    _scannerController.stop();
+                    Navigator.pop(context);
+                  },
+                  child: const Text('Cancel'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+
+      if (barcode != null && barcode.isNotEmpty && mounted) {
+        setState(() {
+          _barcodeController.text = barcode;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error scanning barcode: ${e.toString()}')),
+        );
+      }
+    } finally {
+      _scannerController.stop();
+    }
   }
 
   Future<void> _pickImage() async {
@@ -2558,6 +2707,48 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
     );
   }
 
+  Widget _buildProductListTile(Product product, String docId) {
+    return FutureBuilder<DocumentSnapshot>(
+      future: product.categoryRef.get(),
+      builder: (context, categorySnapshot) {
+        if (!categorySnapshot.hasData) {
+          return ListTile(
+            leading: product.imageUrl != null 
+                ? Image.network(product.imageUrl!, width: 50, height: 50)
+                : const Icon(Icons.shopping_bag),
+            title: Text(product.name),
+            subtitle: Text('€${product.price} - Loading category...'),
+          );
+        }
+
+        final categoryDoc = categorySnapshot.data!;
+        final categoryName = categoryDoc.exists ? categoryDoc['name'] ?? 'Unknown' : 'Unknown';
+
+        return ListTile(
+          leading: product.imageUrl != null 
+              ? Image.network(product.imageUrl!, width: 50, height: 50)
+              : const Icon(Icons.shopping_bag),
+          title: Text(product.name),
+          subtitle: Text('€${product.price} - $categoryName'),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                icon: const Icon(Icons.edit),
+                onPressed: () => _editProduct(product),
+              ),
+              IconButton(
+                icon: const Icon(Icons.delete),
+                onPressed: () => _deleteProduct(docId),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+
   Widget _buildProductsTab() {
     return Padding(
       padding: const EdgeInsets.all(16.0),
@@ -2572,44 +2763,7 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
             itemBuilder: (context, index) {
               final doc = snapshot.data!.docs[index];
               final product = Product.fromFirestore(doc);
-              
-              return FutureBuilder<DocumentSnapshot>(
-                future: product.categoryRef.get(),
-                builder: (context, categorySnapshot) {
-                  if (!categorySnapshot.hasData) {
-                    return ListTile(
-                      leading: product.imageUrl != null 
-                          ? Image.network(product.imageUrl!, width: 50, height: 50)
-                          : const Icon(Icons.shopping_bag),
-                      title: Text(product.name),
-                      subtitle: Text('€${product.price} - Loading category...'),
-                    );
-                  }
-                  
-                  final categoryName = categorySnapshot.data!['name'] ?? 'Unknown';
-                  
-                  return ListTile(
-                    leading: product.imageUrl != null 
-                        ? Image.network(product.imageUrl!, width: 50, height: 50)
-                        : const Icon(Icons.shopping_bag),
-                    title: Text(product.name),
-                    subtitle: Text('€${product.price} - $categoryName'),
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        IconButton(
-                          icon: const Icon(Icons.edit),
-                          onPressed: () => _editProduct(product),
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.delete),
-                          onPressed: () => _deleteProduct(doc.id),
-                        ),
-                      ],
-                    ),
-                  );
-                },
-              );
+              return _buildProductListTile(product, doc.id);
             },
           );
         },
@@ -2683,10 +2837,10 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
               return FutureBuilder<DocumentSnapshot>(
                 future: discount.categoryRef.get(),
                 builder: (context, categorySnapshot) {
-                  final categoryName = categorySnapshot.hasData
-                      ? categorySnapshot.data!.get('name') ?? 'Unknown Category'
-                      : 'Loading...';
-
+                  final categoryDoc = categorySnapshot.data;
+                  final categoryName = categoryDoc != null && categoryDoc.exists
+                      ? categoryDoc.get('name') ?? 'Unknown Category'
+                      : 'Unknown Category';
                   return Card(
                     margin: const EdgeInsets.symmetric(vertical: 8),
                     child: ListTile(
@@ -2777,15 +2931,19 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
                 builder: (context, snapshot) {
                   if (!snapshot.hasData) return const SizedBox();
                   
-                  final categories = snapshot.data!.docs.map((doc) {
+                  final categoryDocs = snapshot.data!.docs;
+
+                  final categories = categoryDocs.map((doc) {
                     return DropdownMenuItem<String>(
                       value: doc.id,
                       child: Text(doc['name']),
                     );
                   }).toList();
-                  
+
+                  final isValidValue = categoryDocs.any((doc) => doc.id == _selectedProductCategory);
+
                   return DropdownButtonFormField<String>(
-                    value: _selectedProductCategory,
+                    value: isValidValue ? _selectedProductCategory : null,
                     decoration: const InputDecoration(labelText: 'Category'),
                     items: categories,
                     onChanged: (value) {
@@ -2799,7 +2957,13 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
               ),
               TextFormField(
                 controller: _barcodeController,
-                decoration: const InputDecoration(labelText: 'Barcode'),
+                decoration: InputDecoration(
+                  labelText: 'Barcode',
+                  suffixIcon: IconButton(
+                    icon: const Icon(Icons.qr_code_scanner),
+                    onPressed: _scanBarcode,
+                  ),
+                ),
                 validator: (value) => value!.isEmpty ? 'Required' : null,
               ),
               const SizedBox(height: 20),
@@ -2892,25 +3056,27 @@ Widget _buildDiscountForm({bool isEditing = false, String? discountId}) {
                 builder: (context, snapshot) {
                   if (!snapshot.hasData) return const SizedBox();
                   
-                  final categories = snapshot.data!.docs.map((doc) {
+                  final categoryItems = snapshot.data!.docs.map((doc) {
                     return DropdownMenuItem<String>(
-                      value: doc.id,  // Use document ID instead of name
+                      value: doc.id,
                       child: Text(doc['name']),
                     );
                   }).toList();
-                  
+
+                  final isValidValue = snapshot.data!.docs.any((doc) => doc.id == _selectedDiscountCategory);
+
                   return DropdownButtonFormField<String>(
-                    value: _selectedDiscountCategory,
+                    value: isValidValue ? _selectedDiscountCategory : null,
                     decoration: const InputDecoration(labelText: 'Category'),
-                    items: categories,
+                    items: categoryItems,
                     onChanged: (value) {
                       setDialogState(() {
                         _selectedDiscountCategory = value;
                       });
                     },
                     validator: (value) => value == null ? 'Please select a category' : null,
-                    );
-                  },
+                  );
+                },
                 ),
                 const SizedBox(height: 10),
                 SwitchListTile(
@@ -2992,84 +3158,1414 @@ Widget _buildDiscountForm({bool isEditing = false, String? discountId}) {
   }
 }
 
-views\admin\reports_screen.dart:
+views\admin\reports_screen copy.dart:
 
-# views\admin\reports_screen.dart
+# views\admin\reports_screen copy.dart
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:intl/intl.dart';
+import 'package:syncfusion_flutter_xlsio/xlsio.dart' as xlsio;
+import 'package:path_provider/path_provider.dart';
+import 'package:open_file/open_file.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'dart:io';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:file_picker/file_picker.dart';
 
-class ReportsScreen extends StatelessWidget {
+class ReportsScreen extends StatefulWidget {
   const ReportsScreen({super.key});
 
+  @override
+  State<ReportsScreen> createState() => _ReportsScreenState();
+}
+
+class _ReportsScreenState extends State<ReportsScreen> {
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  DateTimeRange _dateRange = DateTimeRange(
+    start: DateTime.now().subtract(const Duration(days: 30)),
+    end: DateTime.now(),
+  );
+  String _groupBy = 'day';
+  bool _isLoading = false;
+  List<String> _allAgents = [];
+  List<String> _selectedAgents = [];
+  bool _selectAllAgents = true;
+  Map<String, String> _agentIdToNameMap = {};
+  List<BarChartGroupData> _chartData = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadInitialData();
+  }
+
+  Future<void> _loadInitialData() async {
+    await _fetchAgents();
+    await _loadChartData();
+  }
+
+  Future<void> _fetchAgents() async {
+    try {
+      final snapshot = await _firestore.collection('users')
+          .where('role', isEqualTo: 'agent')
+          .get();
+      
+      setState(() {
+        _agentIdToNameMap = {
+          for (var doc in snapshot.docs) 
+            doc.id: doc['name'] as String
+        };
+        _allAgents = _agentIdToNameMap.values.toList();
+        _selectedAgents = List.from(_allAgents);
+      });
+    } catch (e) {
+      _handleError('Error fetching agents: $e');
+    }
+  }
+
+  Future<void> _loadChartData() async {
+    if (!mounted) return;
+    
+    setState(() => _isLoading = true);
+    try {
+      final data = await _getChartData();
+      setState(() => _chartData = data);
+    } catch (e) {
+      _handleError('Error loading chart data: $e');
+      setState(() => _chartData = []);
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
   Future<List<BarChartGroupData>> _getChartData() async {
-    final snapshot = await FirebaseFirestore.instance.collectionGroup('sales').get();
+    try {
+      Query query = _firestore.collectionGroup('sales')
+        .where('date', isGreaterThanOrEqualTo: _dateRange.start)
+        .where('date', isLessThanOrEqualTo: _dateRange.end);
 
-    final data = snapshot.docs.map((doc) => SalesData(
-          doc['agentId'],
-          doc['totalAmount'].toDouble(),
-        )).toList();
+      if (!_selectAllAgents && _selectedAgents.isNotEmpty) {
+        final agentIds = _selectedAgents.map((name) => 
+          _agentIdToNameMap.keys.firstWhere((id) => _agentIdToNameMap[id] == name))
+          .toList();
+        query = query.where('agentId', whereIn: agentIds);
+      }
 
-    return data.asMap().entries.map((entry) {
-      int index = entry.key;
-      SalesData sales = entry.value;
-      return BarChartGroupData(
-        x: index,
-        barRods: [BarChartRodData(toY: sales.amount, color: Colors.blue)],
+      final QuerySnapshot snapshot = await query.orderBy('date').get();
+      final Map<String, double> groupedData = {};
+
+      for (final doc in snapshot.docs) {
+        try {
+          final date = (doc['date'] as Timestamp).toDate();
+          final amount = (doc['totalAmount'] as num?)?.toDouble() ?? 0.0;
+          final agentId = doc['agentId'] as String? ?? '';
+          final agentName = _agentIdToNameMap[agentId] ?? 'Unknown';
+          final periodKey = _getPeriodKey(date);
+          final groupKey = '${periodKey}_$agentName';
+          
+          groupedData.update(
+            groupKey,
+            (value) => value + amount,
+            ifAbsent: () => amount,
+          );
+        } catch (e) {
+          debugPrint('Error processing document ${doc.id}: $e');
+        }
+      }
+
+      final groupKeys = groupedData.keys.toList();
+      return groupedData.entries.map((entry) {
+        return BarChartGroupData(
+          x: groupKeys.indexOf(entry.key),
+          barRods: [
+            BarChartRodData(
+              toY: entry.value,
+              color: Colors.blue,
+              width: 16,
+              borderRadius: BorderRadius.circular(4),
+            ),
+          ],
+          showingTooltipIndicators: [0],
+        );
+      }).toList();
+    } catch (e) {
+      debugPrint('Error fetching chart data: $e');
+      return [];
+    }
+  }
+
+  Future<Map<String, Map<String, double>>> _getExportData() async {
+    try {
+      Query query = _firestore.collectionGroup('sales')
+        .where('date', isGreaterThanOrEqualTo: _dateRange.start)
+        .where('date', isLessThanOrEqualTo: _dateRange.end);
+
+      if (!_selectAllAgents && _selectedAgents.isNotEmpty) {
+        final agentIds = _selectedAgents.map((name) => 
+          _agentIdToNameMap.keys.firstWhere((id) => _agentIdToNameMap[id] == name))
+          .toList();
+        query = query.where('agentId', whereIn: agentIds);
+      }
+
+      final QuerySnapshot snapshot = await query.orderBy('date').get();
+      final Map<String, Map<String, double>> exportData = {};
+
+      for (final doc in snapshot.docs) {
+        final date = (doc['date'] as Timestamp).toDate();
+        final amount = (doc['totalAmount'] as num).toDouble();
+        final agentId = doc['agentId'] as String;
+        final agentName = _agentIdToNameMap[agentId] ?? 'Unknown';
+        final periodKey = _getPeriodKey(date);
+
+        exportData.putIfAbsent(periodKey, () => {});
+        exportData[periodKey]!.update(
+          agentName,
+          (value) => value + amount,
+          ifAbsent: () => amount,
+        );
+      }
+
+      return exportData;
+    } catch (e) {
+      debugPrint('Error fetching export data: $e');
+      return {};
+    }
+  }
+
+  String _getPeriodKey(DateTime date) {
+    switch (_groupBy) {
+      case 'day':
+        return DateFormat('yyyy-MM-dd').format(date);
+      case 'week':
+        return 'Week ${DateFormat('w').format(date)}';
+      case 'month':
+        return DateFormat('yyyy-MM').format(date);
+      default:
+        return DateFormat('yyyy-MM-dd').format(date);
+    }
+  }
+
+  Future<Directory> _getSafeDownloadDirectory() async {
+    try {
+      if (Platform.isAndroid) {
+        // Request permission to manage external storage
+        PermissionStatus permission = await Permission.manageExternalStorage.request();
+        if (!permission.isGranted) {
+          throw Exception('Permission denied to access storage.');
+        }
+
+        // Try to access the real Downloads folder
+        final directories = await getExternalStorageDirectories(type: StorageDirectory.downloads);
+        if (directories == null || directories.isEmpty) {
+          throw Exception('Downloads directory not found.');
+        }
+        return directories.first;
+      } else if (Platform.isIOS) {
+        // For iOS, use the safe downloads directory
+        final directory = await getDownloadsDirectory();
+        if (directory == null) {
+          throw Exception('Downloads directory not available on iOS.');
+        }
+        return directory;
+      } else {
+        // For other platforms, fallback to temporary directory
+        return await getTemporaryDirectory();
+      }
+    } catch (e) {
+      debugPrint('Error accessing download directory: $e');
+      // If any error happens, fallback to temporary directory
+      return await getTemporaryDirectory();
+    }
+  }
+
+
+  Future<void> _exportToExcel() async {
+    setState(() => _isLoading = true);
+    try {
+      final data = await _getExportData();
+      if (data.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No data to export')),
+        );
+        return;
+      }
+
+      final workbook = xlsio.Workbook();
+      final sheet = workbook.worksheets[0];
+
+      // Write Excel content
+      sheet.getRangeByName('A1').setText('Period');
+      int col = 1;
+      final allAgents = _selectAllAgents ? _allAgents : _selectedAgents;
+      for (final agent in allAgents) {
+        sheet.getRangeByIndex(1, ++col).setText(agent);
+      }
+      sheet.getRangeByIndex(1, ++col).setText('Total');
+      sheet.getRangeByName('A1:${_getExcelColumnName(col)}1').cellStyle.bold = true;
+
+      int row = 2;
+      data.forEach((period, agentData) {
+        sheet.getRangeByIndex(row, 1).setText(period);
+        double rowTotal = 0;
+        col = 1;
+        for (final agent in allAgents) {
+          final amount = agentData[agent] ?? 0;
+          sheet.getRangeByIndex(row, ++col).setNumber(amount);
+          rowTotal += amount;
+        }
+        sheet.getRangeByIndex(row, ++col).setNumber(rowTotal);
+        row++;
+      });
+
+      sheet.getRangeByIndex(row, 1).setText('TOTAL');
+      col = 1;
+      for (final agent in allAgents) {
+        final colLetter = _getExcelColumnName(++col);
+        sheet.getRangeByName('$colLetter$row').setFormula('SUM(${colLetter}2:${colLetter}${row-1})');
+      }
+      final totalCol = _getExcelColumnName(++col);
+      sheet.getRangeByName('${totalCol}$row').setFormula('SUM(${totalCol}2:${totalCol}${row-1})');
+      sheet.getRangeByName('A$row:$totalCol$row').cellStyle.bold = true;
+      sheet.getRangeByName('A1:$totalCol$row').autoFitColumns();
+
+      final bytes = workbook.saveAsStream();
+      workbook.dispose();
+
+      // Ask user to pick a folder
+      String? selectedDirectory = await FilePicker.platform.getDirectoryPath();
+      if (selectedDirectory == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No folder selected')),
+        );
+        return;
+      }
+
+      final fileName = 'SalesReport_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}.xlsx';
+      final file = File('$selectedDirectory/$fileName');
+      await file.writeAsBytes(bytes);
+
+      await OpenFile.open(file.path);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Exported to $fileName')),
       );
-    }).toList();
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Export failed: ${e.toString()}')),
+      );
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+
+
+  String _getExcelColumnName(int column) {
+    String name = '';
+    while (column > 0) {
+      column--;
+      name = '${String.fromCharCode(65 + column % 26)}$name';
+      column = column ~/ 26;
+    }
+    return name;
+  }
+
+  Future<void> _exportToPDF() async {
+    setState(() => _isLoading = true);
+    try {
+      final data = await _getExportData();
+      if (data.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No data to export')),
+        );
+        return;
+      }
+
+      final pdf = pw.Document();
+      final allAgents = _selectAllAgents ? _allAgents : _selectedAgents;
+
+      pdf.addPage(
+        pw.Page(
+          pageFormat: PdfPageFormat.a4,
+          build: (pw.Context context) {
+            return pw.Column(
+              children: [
+                pw.Header(
+                  level: 0,
+                  child: pw.Text(
+                    'Sales Report',
+                    style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold),
+                  ),
+                ),
+                pw.Text(
+                  'Date Range: ${DateFormat('MMM dd, yyyy').format(_dateRange.start)} - '
+                  '${DateFormat('MMM dd, yyyy').format(_dateRange.end)}',
+                  style: const pw.TextStyle(fontSize: 12),
+                ),
+                if (!_selectAllAgents)
+                  pw.Text(
+                    'Agents: ${_selectedAgents.join(', ')}',
+                    style: const pw.TextStyle(fontSize: 12),
+                  ),
+                pw.SizedBox(height: 20),
+                pw.Table.fromTextArray(
+                  context: context,
+                  headers: ['Period', ...allAgents, 'Total'],
+                  data: data.entries.map((entry) {
+                    final period = entry.key;
+                    final agentData = entry.value;
+                    final total = agentData.values.fold(0.0, (sum, amount) => sum + amount);
+
+                    return [
+                      period,
+                      ...allAgents.map((agent) => agentData[agent]?.toStringAsFixed(2) ?? '0.00'),
+                      total.toStringAsFixed(2)
+                    ];
+                  }).toList(),
+                  cellStyle: const pw.TextStyle(fontSize: 10),
+                  headerStyle: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold),
+                ),
+              ],
+            );
+          },
+        ),
+      );
+
+      // Save the PDF file
+      final directory = await _getSafeDownloadDirectory();
+      final fileName = 'SalesReport_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}.pdf';
+      final file = File('${directory.path}/$fileName');
+      await file.writeAsBytes(await pdf.save());
+
+      // Try to open the file
+      final result = await OpenFile.open(file.path);
+
+      // Notify the user
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Exported to $fileName')),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Export failed: ${e.toString()}')),
+      );
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+
+  Future<void> _showAgentFilterDialog() async {
+    await showDialog(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              title: const Text('Filter by Agent'),
+              content: SingleChildScrollView(
+                child: Column(
+                  children: [
+                    CheckboxListTile(
+                      title: const Text('All Agents'),
+                      value: _selectAllAgents,
+                      onChanged: (value) {
+                        setState(() {
+                          _selectAllAgents = value ?? true;
+                          if (_selectAllAgents) {
+                            _selectedAgents = List.from(_allAgents);
+                          }
+                        });
+                      },
+                    ),
+                    const Divider(),
+                    ..._allAgents.map((agent) {
+                      return CheckboxListTile(
+                        title: Text(agent),
+                        value: _selectedAgents.contains(agent),
+                        onChanged: _selectAllAgents
+                            ? null
+                            : (value) {
+                                setState(() {
+                                  if (value ?? false) {
+                                    _selectedAgents.add(agent);
+                                  } else {
+                                    _selectedAgents.remove(agent);
+                                  }
+                                });
+                              },
+                      );
+                    }).toList(),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Cancel'),
+                ),
+                TextButton(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    _loadChartData();
+                  },
+                  child: const Text('Apply'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<void> _selectDateRange(BuildContext context) async {
+    final DateTimeRange? picked = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(2020),
+      lastDate: DateTime.now(),
+      initialDateRange: _dateRange,
+    );
+    
+    if (picked != null && picked != _dateRange) {
+      setState(() => _dateRange = picked);
+      await _loadChartData();
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Rapports'),
+        title: const Text('Sales Reports'),
         actions: [
           IconButton(
+            icon: const Icon(Icons.filter_alt),
+            onPressed: _showAgentFilterDialog,
+            tooltip: 'Filter by Agent',
+          ),
+          IconButton(
+            icon: const Icon(Icons.date_range),
+            onPressed: () => _selectDateRange(context),
+            tooltip: 'Select Date Range',
+          ),
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.group_work),
+            onSelected: (value) {
+              setState(() => _groupBy = value);
+              _loadChartData();
+            },
+            itemBuilder: (context) => [
+              const PopupMenuItem(value: 'day', child: Text('Daily')),
+              const PopupMenuItem(value: 'week', child: Text('Weekly')),
+              const PopupMenuItem(value: 'month', child: Text('Monthly')),
+            ],
+          ),
+          PopupMenuButton<String>(
             icon: const Icon(Icons.download),
-            onPressed: _exportToExcel,
+            onSelected: (value) {
+              if (value == 'excel') _exportToExcel();
+              if (value == 'pdf') _exportToPDF();
+            },
+            itemBuilder: (context) => [
+              const PopupMenuItem(value: 'excel', child: Text('Export to Excel')),
+              const PopupMenuItem(value: 'pdf', child: Text('Export to PDF')),
+            ],
           ),
         ],
       ),
-      body: FutureBuilder<List<BarChartGroupData>>(
-        future: _getChartData(),
-        builder: (context, snapshot) {
-          if (!snapshot.hasData) {
-            return const Center(child: CircularProgressIndicator());
-          }
-
-          return Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: BarChart(
-              BarChartData(
-                barGroups: snapshot.data!,
-                titlesData: FlTitlesData(
-                  leftTitles: AxisTitles(sideTitles: SideTitles(showTitles: true)),
-                  bottomTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : _chartData.isEmpty
+              ? const Center(child: Text('No sales data available'))
+              : Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    children: [
+                      Text(
+                        'Sales Report: ${DateFormat('MMM dd, yyyy').format(_dateRange.start)} - '
+                        '${DateFormat('MMM dd, yyyy').format(_dateRange.end)}',
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                      if (!_selectAllAgents)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 8.0),
+                          child: Text(
+                            'Agents: ${_selectedAgents.join(', ')}',
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                        ),
+                      const SizedBox(height: 16),
+                      Expanded(
+                        child: BarChart(
+                          BarChartData(
+                            alignment: BarChartAlignment.spaceAround,
+                            barGroups: _chartData,
+                            titlesData: FlTitlesData(
+                              leftTitles: AxisTitles(
+                                sideTitles: SideTitles(
+                                  showTitles: true,
+                                  getTitlesWidget: (value, meta) {
+                                    return Text(value.toInt().toString());
+                                  },
+                                  reservedSize: 40,
+                                ),
+                              ),
+                              bottomTitles: AxisTitles(
+                                sideTitles: SideTitles(
+                                  showTitles: true,
+                                  getTitlesWidget: (value, meta) {
+                                    final index = value.toInt();
+                                    if (index >= 0 && index < _chartData.length) {
+                                      final date = _dateRange.start.add(Duration(days: index));
+                                      return Padding(
+                                        padding: const EdgeInsets.only(top: 8.0),
+                                        child: Text(
+                                          _getPeriodKey(date),
+                                          style: const TextStyle(fontSize: 10),
+                                        ),
+                                      );
+                                    }
+                                    return const Text('');
+                                  },
+                                  reservedSize: 32,
+                                ),
+                              ),
+                            ),
+                            gridData: FlGridData(show: true),
+                            borderData: FlBorderData(show: false),
+                            barTouchData: BarTouchData(
+                              enabled: true,
+                              touchTooltipData: BarTouchTooltipData(
+                                getTooltipColor: (BarChartGroupData group) => Colors.blueGrey,
+                                getTooltipItem: (group, groupIndex, rod, rodIndex) {
+                                  final date = _dateRange.start.add(Duration(days: groupIndex));
+                                  return BarTooltipItem(
+                                    '${_getPeriodKey(date)}\n',
+                                    const TextStyle(color: Colors.white),
+                                    children: [
+                                      TextSpan(
+                                        text: '€${rod.toY.toStringAsFixed(2)}',
+                                        style: const TextStyle(
+                                          color: Colors.yellow,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ],
+                                  );
+                                },
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-                borderData: FlBorderData(show: false),
-                barTouchData: BarTouchData(enabled: true),
-              ),
-            ),
+    );
+  }
+    void _handleError(String message) {
+    debugPrint(message);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message)),
+      );
+    }
+  }
+}
+
+views\admin\reports_screen.dart:
+
+# views\admin\reports_screen.dart
+import 'package:flutter/material.dart';
+import 'package:fl_chart/fl_chart.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:intl/intl.dart';
+import 'package:syncfusion_flutter_xlsio/xlsio.dart' as xlsio;
+import 'package:path_provider/path_provider.dart';
+import 'package:open_file/open_file.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'dart:io';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
+
+enum ChartType { bar, line, pie }
+
+class SalesChartData {
+  final String periodKey;
+  final String agentName;
+  final double amount;
+  final int xIndex;
+
+  SalesChartData({
+    required this.periodKey,
+    required this.agentName,
+    required this.amount,
+    required this.xIndex,
+  });
+
+  String get key => '${periodKey}_$agentName';
+}
+
+class ReportsScreen extends StatefulWidget {
+  const ReportsScreen({super.key});
+
+  @override
+  State<ReportsScreen> createState() => _ReportsScreenState();
+}
+
+class _ReportsScreenState extends State<ReportsScreen> {
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  DateTimeRange _dateRange = DateTimeRange(
+    start: DateTime.now().subtract(const Duration(days: 30)),
+    end: DateTime.now(),
+  );
+  String _groupBy = 'day';
+  bool _isLoading = false;
+  List<String> _allAgents = [];
+  List<String> _selectedAgents = [];
+  bool _selectAllAgents = true;
+  Map<String, String> _agentIdToNameMap = {};
+  List<SalesChartData> _salesData = [];
+  List<BarChartGroupData> _barChartData = [];
+  ChartType _selectedChartType = ChartType.bar;
+  int _touchedPieIndex = -1;
+  final List<Color> _chartColors = [
+    Colors.blue,
+    Colors.green,
+    Colors.orange,
+    Colors.red,
+    Colors.purple,
+    Colors.teal,
+    Colors.amber,
+    Colors.deepOrange,
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadInitialData();
+  }
+
+  Future<void> _loadInitialData() async {
+    await _fetchAgents();
+    await _loadChartData();
+  }
+
+  Future<void> _fetchAgents() async {
+    try {
+      final snapshot = await _firestore.collection('users')
+          .where('role', isEqualTo: 'agent')
+          .get();
+      
+      setState(() {
+        _agentIdToNameMap = {
+          for (var doc in snapshot.docs) 
+            doc.id: doc['name'] as String
+        };
+        _allAgents = _agentIdToNameMap.values.toList();
+        _selectedAgents = List.from(_allAgents);
+      });
+    } catch (e) {
+      _handleError('Error fetching agents: $e');
+    }
+  }
+
+  Future<void> _loadChartData() async {
+    if (!mounted) return;
+    
+    setState(() => _isLoading = true);
+    try {
+      _salesData = await _getChartData();
+      _barChartData = _convertToBarChartData(_salesData);
+    } catch (e) {
+      _handleError('Error loading chart data: $e');
+      setState(() {
+        _salesData = [];
+        _barChartData = [];
+      });
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  List<BarChartGroupData> _convertToBarChartData(List<SalesChartData> salesData) {
+    return salesData.map((data) {
+      return BarChartGroupData(
+        x: data.xIndex,
+        barRods: [
+          BarChartRodData(
+            toY: data.amount,
+            color: _getColorForIndex(data.xIndex),
+            width: 16,
+            borderRadius: BorderRadius.circular(4),
+          ),
+        ],
+        showingTooltipIndicators: [0],
+      );
+    }).toList();
+  }
+
+  Future<List<SalesChartData>> _getChartData() async {
+    try {
+      Query query = _firestore.collectionGroup('sales')
+        .where('date', isGreaterThanOrEqualTo: _dateRange.start)
+        .where('date', isLessThanOrEqualTo: _dateRange.end);
+
+      if (!_selectAllAgents && _selectedAgents.isNotEmpty) {
+        final agentIds = _selectedAgents.map((name) => 
+          _agentIdToNameMap.keys.firstWhere((id) => _agentIdToNameMap[id] == name))
+          .toList();
+        query = query.where('agentId', whereIn: agentIds);
+      }
+
+      final QuerySnapshot snapshot = await query.orderBy('date').get();
+      final Map<String, double> groupedData = {};
+
+      for (final doc in snapshot.docs) {
+        try {
+          final date = (doc['date'] as Timestamp).toDate();
+          final amount = (doc['totalAmount'] as num?)?.toDouble() ?? 0.0;
+          final agentId = doc['agentId'] as String? ?? '';
+          final agentName = _agentIdToNameMap[agentId] ?? 'Unknown';
+          final periodKey = _getPeriodKey(date);
+          final groupKey = '${periodKey}_$agentName';
+          
+          groupedData.update(
+            groupKey,
+            (value) => value + amount,
+            ifAbsent: () => amount,
           );
-        },
+        } catch (e) {
+          debugPrint('Error processing document ${doc.id}: $e');
+        }
+      }
+
+      final groupKeys = groupedData.keys.toList();
+      return groupedData.entries.map((entry) {
+        final parts = entry.key.split('_');
+        return SalesChartData(
+          periodKey: parts[0],
+          agentName: parts.length > 1 ? parts[1] : 'Unknown',
+          amount: entry.value,
+          xIndex: groupKeys.indexOf(entry.key),
+        );
+      }).toList();
+    } catch (e) {
+      debugPrint('Error fetching chart data: $e');
+      return [];
+    }
+  }
+
+  Color _getColorForIndex(int index) {
+    return _chartColors[index % _chartColors.length];
+  }
+
+  Color _getColorForAgent(String agentName) {
+    final index = _allAgents.indexOf(agentName);
+    return index >= 0 ? _getColorForIndex(index) : Colors.grey;
+  }
+
+  Future<Map<String, Map<String, double>>> _getExportData() async {
+    try {
+      Query query = _firestore.collectionGroup('sales')
+        .where('date', isGreaterThanOrEqualTo: _dateRange.start)
+        .where('date', isLessThanOrEqualTo: _dateRange.end);
+
+      if (!_selectAllAgents && _selectedAgents.isNotEmpty) {
+        final agentIds = _selectedAgents.map((name) => 
+          _agentIdToNameMap.keys.firstWhere((id) => _agentIdToNameMap[id] == name))
+          .toList();
+        query = query.where('agentId', whereIn: agentIds);
+      }
+
+      final QuerySnapshot snapshot = await query.orderBy('date').get();
+      final Map<String, Map<String, double>> exportData = {};
+
+      for (final doc in snapshot.docs) {
+        final date = (doc['date'] as Timestamp).toDate();
+        final amount = (doc['totalAmount'] as num).toDouble();
+        final agentId = doc['agentId'] as String;
+        final agentName = _agentIdToNameMap[agentId] ?? 'Unknown';
+        final periodKey = _getPeriodKey(date);
+
+        exportData.putIfAbsent(periodKey, () => {});
+        exportData[periodKey]!.update(
+          agentName,
+          (value) => value + amount,
+          ifAbsent: () => amount,
+        );
+      }
+
+      return exportData;
+    } catch (e) {
+      debugPrint('Error fetching export data: $e');
+      return {};
+    }
+  }
+
+  String _getPeriodKey(DateTime date) {
+    switch (_groupBy) {
+      case 'day':
+        return DateFormat('yyyy-MM-dd').format(date);
+      case 'week':
+        return 'Week ${DateFormat('w').format(date)}';
+      case 'month':
+        return DateFormat('yyyy-MM').format(date);
+      default:
+        return DateFormat('yyyy-MM-dd').format(date);
+    }
+  }
+
+  Future<Directory> _getSafeDownloadDirectory() async {
+    try {
+      if (Platform.isAndroid) {
+        final status = await Permission.manageExternalStorage.request();
+        if (!status.isGranted) throw Exception('Permission denied');
+        
+        final directories = await getExternalStorageDirectories(
+          type: StorageDirectory.downloads
+        );
+        if (directories == null || directories.isEmpty) {
+          throw Exception('Downloads directory not found');
+        }
+        return directories.first;
+      } else if (Platform.isIOS) {
+        final directory = await getDownloadsDirectory();
+        if (directory == null) throw Exception('Downloads directory not available');
+        return directory;
+      }
+      return await getTemporaryDirectory();
+    } catch (e) {
+      debugPrint('Error accessing download directory: $e');
+      return await getTemporaryDirectory();
+    }
+  }
+
+  Future<void> _exportToExcel() async {
+    setState(() => _isLoading = true);
+    try {
+      final data = await _getExportData();
+      if (data.isEmpty) {
+        _showSnackBar('No data to export');
+        return;
+      }
+
+      final workbook = xlsio.Workbook();
+      final sheet = workbook.worksheets[0];
+
+      sheet.getRangeByName('A1').setText('Period');
+      int col = 1;
+      final allAgents = _selectAllAgents ? _allAgents : _selectedAgents;
+      for (final agent in allAgents) {
+        sheet.getRangeByIndex(1, ++col).setText(agent);
+      }
+      sheet.getRangeByIndex(1, ++col).setText('Total');
+      sheet.getRangeByName('A1:${_getExcelColumnName(col)}1').cellStyle.bold = true;
+
+      int row = 2;
+      data.forEach((period, agentData) {
+        sheet.getRangeByIndex(row, 1).setText(period);
+        double rowTotal = 0;
+        col = 1;
+        for (final agent in allAgents) {
+          final amount = agentData[agent] ?? 0;
+          sheet.getRangeByIndex(row, ++col).setNumber(amount);
+          rowTotal += amount;
+        }
+        sheet.getRangeByIndex(row, ++col).setNumber(rowTotal);
+        row++;
+      });
+
+      sheet.getRangeByIndex(row, 1).setText('TOTAL');
+      col = 1;
+      for (final agent in allAgents) {
+        final colLetter = _getExcelColumnName(++col);
+        sheet.getRangeByName('$colLetter$row').setFormula('SUM(${colLetter}2:${colLetter}${row-1})');
+      }
+      final totalCol = _getExcelColumnName(++col);
+      sheet.getRangeByName('${totalCol}$row').setFormula('SUM(${totalCol}2:${totalCol}${row-1})');
+      sheet.getRangeByName('A$row:$totalCol$row').cellStyle.bold = true;
+      sheet.getRangeByName('A1:$totalCol$row').autoFitColumns();
+
+      final bytes = workbook.saveAsStream();
+      workbook.dispose();
+
+      final directory = await _getSafeDownloadDirectory();
+      final fileName = 'SalesReport_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}.xlsx';
+      final file = File('${directory.path}/$fileName');
+      await file.writeAsBytes(bytes);
+      await OpenFile.open(file.path);
+
+      _showSnackBar('Exported to $fileName');
+    } catch (e) {
+      _handleError('Export failed: ${e.toString()}');
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _exportToPDF() async {
+    setState(() => _isLoading = true);
+    try {
+      final data = await _getExportData();
+      if (data.isEmpty) {
+        _showSnackBar('No data to export');
+        return;
+      }
+
+      final pdf = pw.Document();
+      final allAgents = _selectAllAgents ? _allAgents : _selectedAgents;
+
+      pdf.addPage(
+        pw.Page(
+          pageFormat: PdfPageFormat.a4,
+          build: (pw.Context context) {
+            return pw.Column(
+              children: [
+                pw.Header(
+                  level: 0,
+                  child: pw.Text(
+                    'Sales Report',
+                    style: pw.TextStyle(fontSize: 24, fontWeight: pw.FontWeight.bold),
+                  ),
+                ),
+                pw.Text(
+                  'Date Range: ${DateFormat('MMM dd, yyyy').format(_dateRange.start)} - '
+                  '${DateFormat('MMM dd, yyyy').format(_dateRange.end)}',
+                  style: const pw.TextStyle(fontSize: 12),
+                ),
+                if (!_selectAllAgents)
+                  pw.Text(
+                    'Agents: ${_selectedAgents.join(', ')}',
+                    style: const pw.TextStyle(fontSize: 12),
+                  ),
+                pw.SizedBox(height: 20),
+                pw.Table.fromTextArray(
+                  context: context,
+                  headers: ['Period', ...allAgents, 'Total'],
+                  data: data.entries.map((entry) {
+                    final period = entry.key;
+                    final agentData = entry.value;
+                    final total = agentData.values.fold(0.0, (sum, amount) => sum + amount);
+
+                    return [
+                      period,
+                      ...allAgents.map((agent) => agentData[agent]?.toStringAsFixed(2) ?? '0.00'),
+                      total.toStringAsFixed(2)
+                    ];
+                  }).toList(),
+                  cellStyle: const pw.TextStyle(fontSize: 10),
+                  headerStyle: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold),
+                ),
+              ],
+            );
+          },
+        ),
+      );
+
+      final directory = await _getSafeDownloadDirectory();
+      final fileName = 'SalesReport_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}.pdf';
+      final file = File('${directory.path}/$fileName');
+      await file.writeAsBytes(await pdf.save());
+      await OpenFile.open(file.path);
+
+      _showSnackBar('Exported to $fileName');
+    } catch (e) {
+      _handleError('Export failed: ${e.toString()}');
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  String _getExcelColumnName(int column) {
+    String name = '';
+    while (column > 0) {
+      column--;
+      name = '${String.fromCharCode(65 + column % 26)}$name';
+      column = column ~/ 26;
+    }
+    return name;
+  }
+
+  Future<void> _showAgentFilterDialog() async {
+    await showDialog(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              title: const Text('Filter by Agent'),
+              content: SingleChildScrollView(
+                child: Column(
+                  children: [
+                    CheckboxListTile(
+                      title: const Text('All Agents'),
+                      value: _selectAllAgents,
+                      onChanged: (value) {
+                        setState(() {
+                          _selectAllAgents = value ?? true;
+                          if (_selectAllAgents) {
+                            _selectedAgents = List.from(_allAgents);
+                          }
+                        });
+                      },
+                    ),
+                    const Divider(),
+                    ..._allAgents.map((agent) {
+                      return CheckboxListTile(
+                        title: Text(agent),
+                        value: _selectedAgents.contains(agent),
+                        onChanged: _selectAllAgents
+                            ? null
+                            : (value) {
+                                setState(() {
+                                  if (value ?? false) {
+                                    _selectedAgents.add(agent);
+                                  } else {
+                                    _selectedAgents.remove(agent);
+                                  }
+                                });
+                              },
+                      );
+                    }).toList(),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Cancel'),
+                ),
+                TextButton(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    _loadChartData();
+                  },
+                  child: const Text('Apply'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<void> _selectDateRange(BuildContext context) async {
+    final DateTimeRange? picked = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(2020),
+      lastDate: DateTime.now(),
+      initialDateRange: _dateRange,
+    );
+    
+    if (picked != null && picked != _dateRange) {
+      setState(() => _dateRange = picked);
+      await _loadChartData();
+    }
+  }
+
+  Widget _buildChart() {
+    return Expanded(
+      child: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : _salesData.isEmpty
+              ? const Center(child: Text('No sales data available'))
+              : _buildSelectedChart(),
+    );
+  }
+
+  Widget _buildSelectedChart() {
+    switch (_selectedChartType) {
+      case ChartType.line:
+        return _buildLineChart();
+      case ChartType.pie:
+        return _buildPieChart();
+      case ChartType.bar:
+      default:
+        return _buildBarChart();
+    }
+  }
+
+  Widget _buildBarChart() {
+    return BarChart(
+      BarChartData(
+        alignment: BarChartAlignment.spaceAround,
+        barGroups: _barChartData,
+        titlesData: FlTitlesData(
+          leftTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              getTitlesWidget: (value, meta) {
+                return Text(value.toInt().toString());
+              },
+              reservedSize: 40,
+            ),
+          ),
+          bottomTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              getTitlesWidget: (value, meta) {
+                final index = value.toInt();
+                if (index >= 0 && index < _salesData.length) {
+                  return Padding(
+                    padding: const EdgeInsets.only(top: 8.0),
+                    child: Text(
+                      _salesData[index].periodKey,
+                      style: const TextStyle(fontSize: 10),
+                    ),
+                  );
+                }
+                return const Text('');
+              },
+              reservedSize: 32,
+            ),
+          ),
+        ),
+        gridData: FlGridData(show: true),
+        borderData: FlBorderData(show: false),
+        barTouchData: BarTouchData(
+          enabled: true,
+          touchTooltipData: BarTouchTooltipData(
+            getTooltipColor: (group) => Colors.blueGrey,
+            getTooltipItem: (group, groupIndex, rod, rodIndex) {
+              final data = _salesData[groupIndex];
+              return BarTooltipItem(
+                '${data.periodKey}\n${data.agentName}\n',
+                const TextStyle(color: Colors.white),
+                children: [
+                  TextSpan(
+                    text: '\$${rod.toY.toStringAsFixed(2)}',
+                    style: const TextStyle(
+                      color: Colors.yellow,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+        ),
       ),
     );
   }
 
-  void _exportToExcel() {
-    // Intégrer l'export XLSX ici
+  Widget _buildLineChart() {
+    return LineChart(
+      LineChartData(
+        lineBarsData: [
+          LineChartBarData(
+            spots: _salesData.asMap().entries.map((e) {
+              return FlSpot(e.key.toDouble(), e.value.amount);
+            }).toList(),
+            isCurved: true,
+            color: Colors.blue,
+            barWidth: 4,
+            belowBarData: BarAreaData(show: false),
+            dotData: FlDotData(show: true),
+          ),
+        ],
+        titlesData: FlTitlesData(
+          leftTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              getTitlesWidget: (value, meta) {
+                return Text(value.toInt().toString());
+              },
+              reservedSize: 40,
+            ),
+          ),
+          bottomTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              getTitlesWidget: (value, meta) {
+                final index = value.toInt();
+                if (index >= 0 && index < _salesData.length) {
+                  return Padding(
+                    padding: const EdgeInsets.only(top: 8.0),
+                    child: Text(
+                      _salesData[index].periodKey,
+                      style: const TextStyle(fontSize: 10),
+                    ),
+                  );
+                }
+                return const Text('');
+              },
+              reservedSize: 32,
+            ),
+          ),
+        ),
+        gridData: FlGridData(show: true),
+        borderData: FlBorderData(show: true),
+      ),
+    );
+  }
+
+  Widget _buildPieChart() {
+    final Map<String, double> agentTotals = {};
+    for (final data in _salesData) {
+      agentTotals.update(
+        data.agentName,
+        (value) => value + data.amount,
+        ifAbsent: () => data.amount,
+      );
+    }
+
+    final List<PieChartSectionData> pieSections = agentTotals.entries.map((e) {
+      final isTouched = _touchedPieIndex == agentTotals.keys.toList().indexOf(e.key);
+      return PieChartSectionData(
+        color: _getColorForAgent(e.key),
+        value: e.value,
+        title: '${e.value.toStringAsFixed(0)}\n${e.key}',
+        radius: isTouched ? 60 : 50,
+        titleStyle: TextStyle(
+          fontSize: isTouched ? 16 : 14,
+          fontWeight: FontWeight.bold,
+          color: Colors.white,
+        ),
+      );
+    }).toList();
+
+    return PieChart(
+      PieChartData(
+        pieTouchData: PieTouchData(
+          touchCallback: (FlTouchEvent event, pieTouchResponse) {
+            setState(() {
+              if (!event.isInterestedForInteractions ||
+                  pieTouchResponse == null ||
+                  pieTouchResponse.touchedSection == null) {
+                _touchedPieIndex = -1;
+                return;
+              }
+              _touchedPieIndex = pieTouchResponse.touchedSection!.touchedSectionIndex;
+            });
+          },
+        ),
+        borderData: FlBorderData(show: false),
+        sectionsSpace: 0,
+        centerSpaceRadius: 60,
+        sections: pieSections,
+      ),
+    );
+  }
+
+  void _handleError(String message) {
+    debugPrint(message);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message)),
+      );
+    }
+  }
+
+  void _showSnackBar(String message) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message)),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Sales Reports'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.filter_alt),
+            onPressed: _showAgentFilterDialog,
+            tooltip: 'Filter by Agent',
+          ),
+          IconButton(
+            icon: const Icon(Icons.date_range),
+            onPressed: () => _selectDateRange(context),
+            tooltip: 'Select Date Range',
+          ),
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.group_work),
+            onSelected: (value) {
+              setState(() => _groupBy = value);
+              _loadChartData();
+            },
+            itemBuilder: (context) => [
+              const PopupMenuItem<String>(
+                value: 'day',
+                child: Text('Daily'),
+              ),
+              const PopupMenuItem<String>(
+                value: 'week',
+                child: Text('Weekly'),
+              ),
+              const PopupMenuItem<String>(
+                value: 'month',
+                child: Text('Monthly'),
+              ),
+            ],
+          ),
+          PopupMenuButton<ChartType>(
+            icon: const Icon(Icons.show_chart),
+            onSelected: (type) => setState(() => _selectedChartType = type),
+            itemBuilder: (context) => [
+              const PopupMenuItem<ChartType>(
+                value: ChartType.bar,
+                child: Text('Bar Chart'),
+              ),
+              const PopupMenuItem<ChartType>(
+                value: ChartType.line,
+                child: Text('Line Chart'),
+              ),
+              const PopupMenuItem<ChartType>(
+                value: ChartType.pie,
+                child: Text('Pie Chart'),
+              ),
+            ],
+          ),
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.download),
+            onSelected: (value) {
+              if (value == 'excel') _exportToExcel();
+              if (value == 'pdf') _exportToPDF();
+            },
+            itemBuilder: (context) => [
+              const PopupMenuItem<String>(
+                value: 'excel',
+                child: Text('Export to Excel'),
+              ),
+              const PopupMenuItem<String>(
+                value: 'pdf',
+                child: Text('Export to PDF'),
+              ),
+            ],
+          ),
+        ],
+      ),
+      body: Column(
+        children: [
+          Text(
+            'Sales Report: ${DateFormat('MMM dd, yyyy').format(_dateRange.start)} - '
+            '${DateFormat('MMM dd, yyyy').format(_dateRange.end)}',
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          if (!_selectAllAgents)
+            Padding(
+              padding: const EdgeInsets.only(top: 8.0),
+              child: Text(
+                'Agents: ${_selectedAgents.join(', ')}',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ),
+          const SizedBox(height: 16),
+          _buildChart(),
+        ],
+      ),
+    );
   }
 }
-
-class SalesData {
-  final String agent;
-  final double amount;
-
-  SalesData(this.agent, this.amount);
-}
-
 
 views\admin\stock_management.dart:
 
@@ -3638,7 +5134,7 @@ import 'package:salesgo/viewmodels/discount_vm.dart';
 import 'package:salesgo/viewmodels/stock_vm.dart';
 import 'sales_screen.dart';
 import 'stock_screen.dart';
-import 'history_screen.dart';
+import 'sales_history_screen.dart';
 
 class AgentHomeScreen extends StatefulWidget {
   const AgentHomeScreen({super.key});
@@ -3720,9 +5216,252 @@ class _AgentHomeScreenState extends State<AgentHomeScreen> {
   }
 }
 
-views\agent\history_screen.dart:
+views\agent\refund_screen.dart:
 
-# views\agent\history_screen.dart
+# views\agent\refund_screen.dart
+import 'package:flutter/material.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:provider/provider.dart';
+import 'package:salesgo/services/firestore_service.dart';
+import 'package:salesgo/viewmodels/auth_vm.dart';
+import 'package:salesgo/viewmodels/refund_vm.dart';
+import 'package:salesgo/widgets/product_details_card.dart';
+import 'package:salesgo/widgets/refund_product_card.dart';
+
+class RefundScreen extends StatefulWidget {
+  const RefundScreen({super.key});
+
+  @override
+  State<RefundScreen> createState() => _RefundScreenState();
+}
+
+class _RefundScreenState extends State<RefundScreen> {
+  final MobileScannerController _scannerController = MobileScannerController();
+  final FirestoreService _firestoreService = FirestoreService();
+  bool _isScanning = false;
+  bool _isProcessingRefund = false;
+  bool _hasScanned = false;
+
+  @override
+  void dispose() {
+    _scannerController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final refundVM = Provider.of<RefundViewModel>(context);
+    final authVM = Provider.of<AuthViewModel>(context, listen: false);
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Process Refund'),
+        actions: [
+          IconButton(
+            icon: Icon(_isScanning ? Icons.no_photography : Icons.qr_code_scanner),
+            onPressed: _toggleScanning,
+          ),
+        ],
+      ),
+      body: Stack(
+        children: [
+          Column(
+            children: [
+              if (_isScanning) _buildScannerSection(context, refundVM),
+              Expanded(
+                child: ListView.builder(
+                  itemCount: refundVM.refundItems.length,
+                  itemBuilder: (context, index) => RefundProductCard(
+                    product: refundVM.refundItems[index],
+                    onRemove: () {
+                      refundVM.removeFromRefund(index);
+                      if (refundVM.refundItems.isEmpty) {
+                        setState(() => _hasScanned = false);
+                      }
+                    },
+                  ),
+                ),
+              ),
+              if (refundVM.refundItems.isNotEmpty)
+                _buildRefundControls(context, refundVM, authVM),
+            ],
+          ),
+          if (_isProcessingRefund)
+            const Center(child: CircularProgressIndicator()),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildScannerSection(BuildContext context, RefundViewModel refundVM) {
+    return Container(
+      height: 200,
+      decoration: BoxDecoration(
+        border: Border.all(color: Colors.grey),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: MobileScanner(
+        controller: _scannerController,
+        onDetect: (capture) {
+          if (!_hasScanned) {
+            _handleBarcodeScan(capture, context, refundVM);
+          }
+        },
+      ),
+    );
+  }
+
+  Widget _buildRefundControls(BuildContext context, RefundViewModel refundVM, AuthViewModel authVM) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surface,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 8,
+            offset: const Offset(0, -4),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text('Total Refund:', style: TextStyle(fontSize: 18)),
+              Text(
+                '€${refundVM.totalRefundAmount.toStringAsFixed(2)}',
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () => refundVM.clearRefund(),
+                  child: const Text('Clear'),
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.red, // Red color for refund action
+                  ),
+                  onPressed: () => _processRefund(context, refundVM, authVM),
+                  child: const Text('Process Refund'),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _handleBarcodeScan(
+    BarcodeCapture capture,
+    BuildContext context,
+    RefundViewModel refundVM,
+  ) async {
+    if (capture.barcodes.isEmpty || _hasScanned) return;
+
+    final barcode = capture.barcodes.first.rawValue;
+    if (barcode == null) return;
+
+    setState(() {
+      _hasScanned = true;
+      _isScanning = false;
+    });
+    _scannerController.stop();
+
+    try {
+      final product = await _firestoreService.getProductByBarcode(barcode);
+      if (product == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Product not found')),
+        );
+        setState(() => _hasScanned = false);
+        return;
+      }
+
+      refundVM.addToRefund(product);
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: ${e.toString()}')),
+      );
+      setState(() => _hasScanned = false);
+    }
+  }
+
+  void _toggleScanning() {
+    setState(() {
+      _isScanning = !_isScanning;
+      if (_isScanning) {
+        _hasScanned = false;
+        _scannerController.start();
+      } else {
+        _scannerController.stop();
+      }
+    });
+  }
+
+  Future<void> _processRefund(
+    BuildContext context,
+    RefundViewModel refundVM,
+    AuthViewModel authVM,
+  ) async {
+    if (authVM.currentUser == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('User not authenticated')),
+      );
+      return;
+    }
+
+    if (refundVM.refundItems.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No items to refund')),
+      );
+      return;
+    }
+
+    setState(() => _isProcessingRefund = true);
+
+    try {
+      // Implement your refund logic here
+      // Example: await _firestoreService.processRefund(...);
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Refund processed successfully!')),
+      );
+
+      refundVM.clearRefund();
+      setState(() {
+        _isScanning = true;
+        _isProcessingRefund = false;
+        _hasScanned = false;
+      });
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error processing refund: ${e.toString()}')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isProcessingRefund = false);
+      }
+    }
+  }
+}
+
+views\agent\sales_history_screen.dart:
+
+# views\agent\sales_history_screen.dart
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
@@ -4010,163 +5749,163 @@ class _HistoryScreenState extends State<HistoryScreen> {
     );
   }
 
-Widget _buildGroupedByCategory(List<Sale> sales) {
-  final categoryGroups = <String, CategorySalesData>{};
-  
-  // Group sales by category
-  for (final sale in sales) {
-    final categoryQuantities = <String, int>{};
-    final categoryAmounts = <String, double>{};
-    final productsByCategory = <String, Product>{};
+  Widget _buildGroupedByCategory(List<Sale> sales) {
+    final categoryGroups = <String, CategorySalesData>{};
+    
+    // Group sales by category
+    for (final sale in sales) {
+      final categoryQuantities = <String, int>{};
+      final categoryAmounts = <String, double>{};
+      final productsByCategory = <String, Product>{};
 
-    for (final product in sale.products) {
-      final categoryId = product.categoryRef.id;
+      for (final product in sale.products) {
+        final categoryId = product.categoryRef.id;
 
-      categoryQuantities.update(categoryId, (value) => value + 1, ifAbsent: () => 1);
-      categoryAmounts.update(categoryId, (value) => value + product.price, ifAbsent: () => product.price);
-      
-      // Sauvegarder un produit par catégorie pour le prix (on peut en prendre un arbitraire)
-      productsByCategory[categoryId] = product;
+        categoryQuantities.update(categoryId, (value) => value + 1, ifAbsent: () => 1);
+        categoryAmounts.update(categoryId, (value) => value + product.price, ifAbsent: () => product.price);
+        
+        // Sauvegarder un produit par catégorie pour le prix (on peut en prendre un arbitraire)
+        productsByCategory[categoryId] = product;
+      }
+
+      for (final categoryId in categoryQuantities.keys) {
+        categoryGroups.putIfAbsent(categoryId, () => CategorySalesData(
+          categoryId: categoryId,
+          sales: [],
+        ));
+
+        categoryGroups[categoryId]!.sales.add(sale);
+        categoryGroups[categoryId]!.totalQuantity += categoryQuantities[categoryId]!;
+        categoryGroups[categoryId]!.totalAmount += categoryAmounts[categoryId]!;
+      }
     }
 
-    for (final categoryId in categoryQuantities.keys) {
-      categoryGroups.putIfAbsent(categoryId, () => CategorySalesData(
-        categoryId: categoryId,
-        sales: [],
-      ));
 
-      categoryGroups[categoryId]!.sales.add(sale);
-      categoryGroups[categoryId]!.totalQuantity += categoryQuantities[categoryId]!;
-      categoryGroups[categoryId]!.totalAmount += categoryAmounts[categoryId]!;
-    }
-  }
+    return ListView(
+      children: categoryGroups.entries.map((entry) {
+        final data = entry.value;
+        
+        return FutureBuilder<DocumentSnapshot>(
+          future: data.categoryId.contains('/')
+              ? FirebaseFirestore.instance.doc(data.categoryId).get()
+              : FirebaseFirestore.instance.collection('categories').doc(data.categoryId).get(),
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const ListTile(
+                leading: Icon(Icons.category),
+                title: Text('Loading...'),
+              );
+            }
 
+            String categoryName = 'Uncategorized';
+            if (snapshot.hasData && snapshot.data!.exists) {
+              categoryName = snapshot.data!.get('name') ?? 'Uncategorized';
+            }
 
-  return ListView(
-    children: categoryGroups.entries.map((entry) {
-      final data = entry.value;
-      
-      return FutureBuilder<DocumentSnapshot>(
-        future: data.categoryId.contains('/')
-            ? FirebaseFirestore.instance.doc(data.categoryId).get()
-            : FirebaseFirestore.instance.collection('categories').doc(data.categoryId).get(),
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const ListTile(
-              leading: Icon(Icons.category),
-              title: Text('Loading...'),
-            );
-          }
-
-          String categoryName = 'Uncategorized';
-          if (snapshot.hasData && snapshot.data!.exists) {
-            categoryName = snapshot.data!.get('name') ?? 'Uncategorized';
-          }
-
-          return ExpansionTile(
-            leading: const Icon(Icons.category),
-            title: Text(categoryName),
-            subtitle: Text(
-              '${data.totalQuantity} items - Total: €${data.totalAmount.toStringAsFixed(2)}',
-            ),
-            children: [
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Top products:',
-                      style: TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 8),
-                    FutureBuilder<List<Product>>(
-                      future: _getTopProductsInCategory(sales, data.categoryId),
-                      builder: (context, productSnapshot) {
-                        if (!productSnapshot.hasData) {
-                          return const Center(child: CircularProgressIndicator());
-                        }
-                        return Column(
-                          children: productSnapshot.data!.take(3).map((product) {
-                            return ListTile(
-                              contentPadding: EdgeInsets.zero,
-                              leading: product.imageUrl != null
-                                  ? Image.network(
-                                      product.imageUrl!,
-                                      width: 40,
-                                      height: 40,
-                                    )
-                                  : const Icon(Icons.shopping_bag),
-                              title: Text(product.name),
-                              subtitle: Text('€${product.price.toStringAsFixed(2)}'),
-                            );
-                          }).toList(),
-                        );
-                      },
-                    ),
-                    const SizedBox(height: 16),
-                    const Text(
-                      'Recent sales:',
-                      style: TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                    ...data.sales.take(3).map((sale) {
-                      final quantityInCategory = sale.products
-                          .where((p) => p.categoryRef.id == data.categoryId)
-                          .length;
-                      final amountInCategory = sale.products
-                          .where((p) => p.categoryRef.id == data.categoryId)
-                          .fold(0.0, (sum, p) => sum + p.price);
-                      
-                      return ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        title: Text('Sale #${sale.id.substring(0, 6)}'),
-                        subtitle: Text(
-                          DateFormat('MMM dd, HH:mm').format(sale.date),
-                        ),
-                        trailing: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text('$quantityInCategory items'),
-                            Text('€${amountInCategory.toStringAsFixed(2)}'),
-                          ],
-                        ),
-                      );
-                    }).toList(),
-                    if (data.sales.length > 3)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 8.0),
-                        child: Text(
-                          '+ ${data.sales.length - 3} more transactions',
-                          style: TextStyle(color: Colors.grey[600]),
-                        ),
-                      ),
-                  ],
-                ),
+            return ExpansionTile(
+              leading: const Icon(Icons.category),
+              title: Text(categoryName),
+              subtitle: Text(
+                '${data.totalQuantity} items - Total: €${data.totalAmount.toStringAsFixed(2)}',
               ),
-            ],
-          );
-        },
-      );
-    }).toList(),
-  );
+              children: [
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Top products:',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 8),
+                      FutureBuilder<List<Product>>(
+                        future: _getTopProductsInCategory(sales, data.categoryId),
+                        builder: (context, productSnapshot) {
+                          if (!productSnapshot.hasData) {
+                            return const Center(child: CircularProgressIndicator());
+                          }
+                          return Column(
+                            children: productSnapshot.data!.take(3).map((product) {
+                              return ListTile(
+                                contentPadding: EdgeInsets.zero,
+                                leading: product.imageUrl != null
+                                    ? Image.network(
+                                        product.imageUrl!,
+                                        width: 40,
+                                        height: 40,
+                                      )
+                                    : const Icon(Icons.shopping_bag),
+                                title: Text(product.name),
+                                subtitle: Text('€${product.price.toStringAsFixed(2)}'),
+                              );
+                            }).toList(),
+                          );
+                        },
+                      ),
+                      const SizedBox(height: 16),
+                      const Text(
+                        'Recent sales:',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      ...data.sales.take(3).map((sale) {
+                        final quantityInCategory = sale.products
+                            .where((p) => p.categoryRef.id == data.categoryId)
+                            .length;
+                        final amountInCategory = sale.products
+                            .where((p) => p.categoryRef.id == data.categoryId)
+                            .fold(0.0, (sum, p) => sum + p.price);
+                        
+                        return ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: Text('Sale #${sale.id.substring(0, 6)}'),
+                          subtitle: Text(
+                            DateFormat('MMM dd, HH:mm').format(sale.date),
+                          ),
+                          trailing: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text('$quantityInCategory items'),
+                              Text('€${amountInCategory.toStringAsFixed(2)}'),
+                            ],
+                          ),
+                        );
+                      }).toList(),
+                      if (data.sales.length > 3)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 8.0),
+                          child: Text(
+                            '+ ${data.sales.length - 3} more transactions',
+                            style: TextStyle(color: Colors.grey[600]),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+            );
+          },
+        );
+      }).toList(),
+    );
 
-}
-
-Future<List<Product>> _getTopProductsInCategory(List<Sale> sales, String categoryId) async {
-  final productCounts = <Product, int>{};
-  
-  for (final sale in sales) {
-    for (final product in sale.products.where((p) => p.categoryRef.id == categoryId)) {
-      productCounts[product] = (productCounts[product] ?? 0) + 1;
-    }
   }
-  
-  // Sort products by count in descending order
-  final sortedProducts = productCounts.entries.toList()
-    ..sort((a, b) => b.value.compareTo(a.value));
-  
-  return sortedProducts.map((entry) => entry.key).toList();
-}
+
+  Future<List<Product>> _getTopProductsInCategory(List<Sale> sales, String categoryId) async {
+    final productCounts = <Product, int>{};
+    
+    for (final sale in sales) {
+      for (final product in sale.products.where((p) => p.categoryRef.id == categoryId)) {
+        productCounts[product] = (productCounts[product] ?? 0) + 1;
+      }
+    }
+    
+    // Sort products by count in descending order
+    final sortedProducts = productCounts.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    
+    return sortedProducts.map((entry) => entry.key).toList();
+  }
 
   Widget _buildGroupedByDiscount(List<Sale> sales) {
     final discountGroups = <String, DiscountSalesData>{};
@@ -4243,248 +5982,6 @@ Future<List<Product>> _getTopProductsInCategory(List<Sale> sales, String categor
 
 }
 
-views\agent\refund_screen.dart:
-
-# views\agent\refund_screen.dart
-import 'package:flutter/material.dart';
-import 'package:mobile_scanner/mobile_scanner.dart';
-import 'package:provider/provider.dart';
-import 'package:salesgo/services/firestore_service.dart';
-import 'package:salesgo/viewmodels/auth_vm.dart';
-import 'package:salesgo/viewmodels/refund_vm.dart';
-import 'package:salesgo/widgets/product_details_card.dart';
-
-class RefundScreen extends StatefulWidget {
-  const RefundScreen({super.key});
-
-  @override
-  State<RefundScreen> createState() => _RefundScreenState();
-}
-
-class _RefundScreenState extends State<RefundScreen> {
-  final MobileScannerController _scannerController = MobileScannerController();
-  final FirestoreService _firestoreService = FirestoreService();
-  bool _isScanning = false;
-  bool _isProcessingRefund = false;
-  bool _hasScanned = false;
-
-  @override
-  void dispose() {
-    _scannerController.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final refundVM = Provider.of<RefundViewModel>(context);
-    final authVM = Provider.of<AuthViewModel>(context, listen: false);
-
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Process Refund'),
-        actions: [
-          IconButton(
-            icon: Icon(_isScanning ? Icons.no_photography : Icons.qr_code_scanner),
-            onPressed: _toggleScanning,
-          ),
-        ],
-      ),
-      body: Stack(
-        children: [
-          Column(
-            children: [
-              if (_isScanning) _buildScannerSection(context, refundVM),
-              Expanded(
-                child: ListView.builder(
-                  itemCount: refundVM.refundItems.length,
-                  itemBuilder: (context, index) => ProductDetailsCard(
-                    product: refundVM.refundItems[index],
-                    onRemove: () {
-                      refundVM.removeFromRefund(index);
-                      if (refundVM.refundItems.isEmpty) {
-                        setState(() => _hasScanned = false);
-                      }
-                    },
-                  ),
-                ),
-              ),
-              if (refundVM.refundItems.isNotEmpty)
-                _buildRefundControls(context, refundVM, authVM),
-            ],
-          ),
-          if (_isProcessingRefund)
-            const Center(child: CircularProgressIndicator()),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildScannerSection(BuildContext context, RefundViewModel refundVM) {
-    return Container(
-      height: 200,
-      decoration: BoxDecoration(
-        border: Border.all(color: Colors.grey),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: MobileScanner(
-        controller: _scannerController,
-        onDetect: (capture) {
-          if (!_hasScanned) {
-            _handleBarcodeScan(capture, context, refundVM);
-          }
-        },
-      ),
-    );
-  }
-
-  Widget _buildRefundControls(BuildContext context, RefundViewModel refundVM, AuthViewModel authVM) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.1),
-            blurRadius: 8,
-            offset: const Offset(0, -4),
-          ),
-        ],
-      ),
-      child: Column(
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text('Total Refund:', style: TextStyle(fontSize: 18)),
-              Text(
-                '€${refundVM.totalRefundAmount.toStringAsFixed(2)}',
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: () => refundVM.clearRefund(),
-                  child: const Text('Clear'),
-                ),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.red, // Red color for refund action
-                  ),
-                  onPressed: () => _processRefund(context, refundVM, authVM),
-                  child: const Text('Process Refund'),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _handleBarcodeScan(
-    BarcodeCapture capture,
-    BuildContext context,
-    RefundViewModel refundVM,
-  ) async {
-    if (capture.barcodes.isEmpty || _hasScanned) return;
-
-    final barcode = capture.barcodes.first.rawValue;
-    if (barcode == null) return;
-
-    setState(() {
-      _hasScanned = true;
-      _isScanning = false;
-    });
-    _scannerController.stop();
-
-    try {
-      final product = await _firestoreService.getProductByBarcode(barcode);
-      if (product == null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Product not found')),
-        );
-        setState(() => _hasScanned = false);
-        return;
-      }
-
-      refundVM.addToRefund(product);
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: ${e.toString()}')),
-      );
-      setState(() => _hasScanned = false);
-    }
-  }
-
-  void _toggleScanning() {
-    setState(() {
-      _isScanning = !_isScanning;
-      if (_isScanning) {
-        _hasScanned = false;
-        _scannerController.start();
-      } else {
-        _scannerController.stop();
-      }
-    });
-  }
-
-  Future<void> _processRefund(
-    BuildContext context,
-    RefundViewModel refundVM,
-    AuthViewModel authVM,
-  ) async {
-    if (authVM.currentUser == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('User not authenticated')),
-      );
-      return;
-    }
-
-    if (refundVM.refundItems.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No items to refund')),
-      );
-      return;
-    }
-
-    setState(() => _isProcessingRefund = true);
-
-    try {
-      // Implement your refund logic here
-      // Example: await _firestoreService.processRefund(...);
-      
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Refund processed successfully!')),
-      );
-
-      refundVM.clearRefund();
-      setState(() {
-        _isScanning = true;
-        _isProcessingRefund = false;
-        _hasScanned = false;
-      });
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error processing refund: ${e.toString()}')),
-      );
-    } finally {
-      if (mounted) {
-        setState(() => _isProcessingRefund = false);
-      }
-    }
-  }
-}
-
 views\agent\sales_screen.dart:
 
 # views\agent\sales_screen.dart
@@ -4496,9 +5993,9 @@ import 'package:salesgo/viewmodels/auth_vm.dart';
 import 'package:salesgo/viewmodels/sales_vm.dart';
 import 'package:salesgo/widgets/product_details_card.dart';
 import 'package:salesgo/widgets/payment_section.dart';
-import 'package:salesgo/views/agent/history_screen.dart'; // Import your history screen
+import 'package:salesgo/views/agent/sales_history_screen.dart';
 import 'package:salesgo/viewmodels/refund_vm.dart';
-import 'package:salesgo/views/agent/refund_screen.dart';
+import 'package:salesgo/widgets/refund_product_card.dart';
 
 class SalesScreen extends StatefulWidget {
   const SalesScreen({super.key});
@@ -4584,16 +6081,23 @@ class _SalesScreenState extends State<SalesScreen> with SingleTickerProviderStat
                       const Icon(Icons.shopping_cart_outlined,
                           size: 64, color: Colors.grey),
                       const SizedBox(height: 20),
-                      const Text('Ready to Process Sale',
-                          style: TextStyle(fontSize: 20)),
+                      Text(
+                        _isScanning ? 'Scanning in progress' : 'Ready to Process Sale',
+                        style: const TextStyle(fontSize: 20),
+                      ),
                       const SizedBox(height: 10),
-                      const Text('Scan products to add to cart',
-                          style: TextStyle(color: Colors.grey)),
+                      Text(
+                        _isScanning ? 'Point camera at barcode' : 'Scan products to add to cart',
+                        style: const TextStyle(color: Colors.grey),
+                      ),
                       const SizedBox(height: 20),
                       ElevatedButton.icon(
-                        icon: const Icon(Icons.qr_code_scanner),
-                        label: const Text('Start Scanning'),
+                        icon: Icon(_isScanning ? Icons.stop : Icons.qr_code_scanner),
+                        label: Text(_isScanning ? 'Stop Scanning' : 'Start Scanning'),
                         onPressed: _toggleScanning,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: _isScanning ? Colors.red : null,
+                        ),
                       ),
                     ],
                   ),
@@ -4604,7 +6108,7 @@ class _SalesScreenState extends State<SalesScreen> with SingleTickerProviderStat
                 child: ListView.builder(
                   itemCount: salesVM.cartItems.length,
                   itemBuilder: (context, index) => ProductDetailsCard(
-                    product: salesVM.cartItems[index],
+                    cartItem: salesVM.cartItems[index],
                     onRemove: () {
                       salesVM.removeFromCart(index);
                       if (salesVM.cartItems.isEmpty) {
@@ -4688,12 +6192,13 @@ class _SalesScreenState extends State<SalesScreen> with SingleTickerProviderStat
                 Expanded(
                   child: ListView.builder(
                     itemCount: refundVM.refundItems.length,
-                    itemBuilder: (context, index) => ProductDetailsCard(
+                    itemBuilder: (context, index) => RefundProductCard(
                       product: refundVM.refundItems[index],
                       onRemove: () => refundVM.removeFromRefund(index),
                     ),
                   ),
                 ),
+
                 // Refund summary and action buttons
                 Padding(
                   padding: const EdgeInsets.all(16.0),
@@ -5458,22 +6963,22 @@ class _PaymentSectionState extends State<PaymentSection> {
 widgets\product_details_card.dart:
 
 # widgets\product_details_card.dart
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:provider/provider.dart';
-import '../models/product.dart';
+import '../models/cart_item.dart';
 import '../models/discount.dart';
-import 'discount_badge.dart';
 import '../viewmodels/discount_vm.dart';
 import '../viewmodels/sales_vm.dart';
+import 'discount_badge.dart';
 
 class ProductDetailsCard extends StatefulWidget {
-  final Product product;
+  final CartItem cartItem;
   final VoidCallback? onRemove;
 
   const ProductDetailsCard({
     super.key,
-    required this.product,
+    required this.cartItem,
     this.onRemove,
   });
 
@@ -5485,22 +6990,25 @@ class _ProductDetailsCardState extends State<ProductDetailsCard> {
   Discount? _selectedDiscount;
 
   @override
+  void initState() {
+    super.initState();
+    _selectedDiscount = widget.cartItem.discount;
+  }
+
+  @override
   Widget build(BuildContext context) {
     final discountVM = Provider.of<DiscountViewModel>(context);
     final salesVM = Provider.of<SalesViewModel>(context);
 
-    // Get applicable discounts for this product's category
+    final product = widget.cartItem.product;
+
     final applicableDiscounts = discountVM.activeDiscounts
-        .where((d) => d.categoryRef.path == widget.product.categoryRef.path)
+        .where((d) => d.categoryRef.path == product.categoryRef.path)
         .toList();
 
-    // Get the initially selected discount (if any)
-    _selectedDiscount ??= salesVM.getSelectedDiscountForProduct(widget.product.id);
-
-    // Calculate final price based on selected discount
     final finalPrice = _selectedDiscount != null
-        ? _calculatePriceWithDiscount(widget.product.price, _selectedDiscount!)
-        : widget.product.price;
+        ? _calculatePriceWithDiscount(product.price, _selectedDiscount!)
+        : product.price;
 
     return Card(
       margin: const EdgeInsets.all(12),
@@ -5509,21 +7017,21 @@ class _ProductDetailsCardState extends State<ProductDetailsCard> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Product header row with image and name
+            // Header Row
             Row(
               children: [
                 // Product Image
-                if (widget.product.imageUrl != null)
+                if (product.imageUrl != null && product.imageUrl!.isNotEmpty)
                   ClipRRect(
                     borderRadius: BorderRadius.circular(8),
                     child: Image.network(
-                      widget.product.imageUrl!,
+                      product.imageUrl!,
                       width: 80,
                       height: 80,
                       fit: BoxFit.cover,
                     ),
-                  ),
-                if (widget.product.imageUrl == null || widget.product.imageUrl!.isEmpty)
+                  )
+                else
                   Container(
                     width: 80,
                     height: 80,
@@ -5534,59 +7042,42 @@ class _ProductDetailsCardState extends State<ProductDetailsCard> {
                     child: const Icon(Icons.image_not_supported, color: Colors.grey),
                   ),
                 const SizedBox(width: 16),
-                
+
                 // Product Info
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        widget.product.name,
+                        product.name,
                         style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
+                              fontWeight: FontWeight.bold,
+                            ),
                       ),
                       const SizedBox(height: 4),
                       FutureBuilder<DocumentSnapshot>(
-                        future: widget.product.categoryRef.get(),
+                        future: product.categoryRef.get(),
                         builder: (context, snapshot) {
-                          if (snapshot.connectionState == ConnectionState.waiting) {
-                            return Text(
-                              'Loading category...',
-                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                color: Colors.grey[600],
-                              ),
-                            );
-                          }
-                          if (snapshot.hasError) {
-                            return Text(
-                              'Category: Error',
-                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                color: Colors.grey[600],
-                              ),
-                            );
-                          }
-                          final categoryName = snapshot.data?.get('name') ?? 'Uncategorized';
+                          final categoryName =
+                              snapshot.hasData ? snapshot.data?.get('name') ?? '' : 'Loading...';
                           return Text(
                             'Category: $categoryName',
                             style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: Colors.grey[600],
-                            ),
+                                  color: Colors.grey[600],
+                                ),
                           );
                         },
                       ),
-                      if (widget.product.barcode.isNotEmpty)
+                      if (product.barcode.isNotEmpty)
                         Text(
-                          'Barcode: ${widget.product.barcode}',
+                          'Barcode: ${product.barcode}',
                           style: Theme.of(context).textTheme.bodySmall,
                         ),
                     ],
                   ),
                 ),
-                
-                // Remove Button (only shown if onRemove callback is provided)
+
+                // Remove Button
                 if (widget.onRemove != null)
                   IconButton(
                     icon: const Icon(Icons.delete, color: Colors.red),
@@ -5594,16 +7085,14 @@ class _ProductDetailsCardState extends State<ProductDetailsCard> {
                   ),
               ],
             ),
-            
-            const Divider(height: 24, thickness: 1),
-            
-            // Discount Selection
+
+            const Divider(height: 24),
+
+            // Discount Dropdown
             if (applicableDiscounts.isNotEmpty) ...[
               Text(
                 'Available Discounts:',
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  fontWeight: FontWeight.bold,
-                ),
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 8),
               Container(
@@ -5616,46 +7105,44 @@ class _ProductDetailsCardState extends State<ProductDetailsCard> {
                   isExpanded: true,
                   value: _selectedDiscount,
                   hint: const Text('Select discount...'),
-                  underline: const SizedBox(), // Remove default underline
+                  underline: const SizedBox(),
                   items: [
                     const DropdownMenuItem<Discount>(
                       value: null,
                       child: Text('No discount'),
                     ),
-                    ...applicableDiscounts.map((discount) {
-                      return DropdownMenuItem<Discount>(
+                    ...applicableDiscounts.map(
+                      (discount) => DropdownMenuItem<Discount>(
                         value: discount,
                         child: Text(
                           '${discount.value}${discount.type} discount',
                           style: TextStyle(
-                            color: _selectedDiscount == discount 
-                                ? Theme.of(context).primaryColor 
+                            color: _selectedDiscount == discount
+                                ? Theme.of(context).primaryColor
                                 : null,
                           ),
                         ),
-                      );
-                    }).toList(),
+                      ),
+                    ),
                   ],
                   onChanged: (Discount? selected) {
                     setState(() {
                       _selectedDiscount = selected;
                     });
-                    salesVM.selectDiscountForProduct(widget.product.id, selected);
+                    salesVM.selectDiscountForCartItem(widget.cartItem.id, selected);
                   },
                 ),
               ),
               const SizedBox(height: 16),
             ],
-            
-            // Price Information
+
+            // Price Display
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(
                   'Final Price:',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
                 ),
                 Text(
                   '€${finalPrice.toStringAsFixed(2)}',
@@ -5667,13 +7154,12 @@ class _ProductDetailsCardState extends State<ProductDetailsCard> {
                 ),
               ],
             ),
-            
-            // Original price if discounted
+
             if (_selectedDiscount != null)
               Padding(
                 padding: const EdgeInsets.only(top: 4),
                 child: Text(
-                  'Original: €${widget.product.price.toStringAsFixed(2)}',
+                  'Original: €${product.price.toStringAsFixed(2)}',
                   style: TextStyle(
                     fontSize: 14,
                     color: Colors.grey[600],
@@ -5681,8 +7167,7 @@ class _ProductDetailsCardState extends State<ProductDetailsCard> {
                   ),
                 ),
               ),
-            
-            // Discount details if applied
+
             if (_selectedDiscount != null) ...[
               const SizedBox(height: 12),
               DiscountBadge(discount: _selectedDiscount!),
@@ -5694,11 +7179,45 @@ class _ProductDetailsCardState extends State<ProductDetailsCard> {
   }
 
   double _calculatePriceWithDiscount(double basePrice, Discount discount) {
-    return discount.type == '%' 
+    return discount.type == '%'
         ? basePrice * (1 - discount.value / 100)
         : basePrice - discount.value;
   }
 }
+
+
+widgets\refund_product_card.dart:
+
+# widgets\refund_product_card.dart
+import 'package:flutter/material.dart';
+import '../models/product.dart';
+
+class RefundProductCard extends StatelessWidget {
+  final Product product;
+  final VoidCallback? onRemove;
+
+  const RefundProductCard({
+    super.key,
+    required this.product,
+    this.onRemove,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      margin: const EdgeInsets.all(12),
+      child: ListTile(
+        title: Text(product.name),
+        subtitle: Text('Price: €${product.price?.toStringAsFixed(2) ?? 'N/A'}'),
+        trailing: IconButton(
+          icon: const Icon(Icons.delete, color: Colors.red),
+          onPressed: onRemove,
+        ),
+      ),
+    );
+  }
+}
+
 
 widgets\role_based_ui.dart:
 
