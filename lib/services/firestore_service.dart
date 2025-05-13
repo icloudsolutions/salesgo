@@ -7,6 +7,72 @@ import '../models/sale.dart';
 class FirestoreService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
+  Future<Product> addProduct({
+    required String name,
+    required double price,
+    required String categoryId,
+    required String barcode,
+    String? imageUrl,
+  }) async {
+    final cleanedBarcode = barcode.trim().toUpperCase();
+    
+    if (!await isBarcodeUnique(cleanedBarcode)) {
+      throw 'Product with barcode "$cleanedBarcode" already exists';
+    }
+
+    final productRef = _firestore.collection('products').doc();
+    final product = Product(
+      id: productRef.id,
+      name: name,
+      price: price,
+      categoryRef: _firestore.collection('categories').doc(categoryId),
+      barcode: cleanedBarcode,
+      imageUrl: imageUrl,
+
+    );
+
+    await productRef.set(product.toMap());
+    return product;
+  }
+
+  Future<void> updateProduct({
+    required String productId,
+    required String name,
+    required double price,
+    required String categoryId,
+    required String barcode,
+    String? imageUrl,
+  }) async {
+    final cleanedBarcode = barcode.trim().toUpperCase();
+    
+    if (!await isBarcodeUnique(cleanedBarcode, excludeProductId: productId)) {
+      throw 'Product with barcode "$cleanedBarcode" already exists';
+    }
+
+    await _firestore.collection('products').doc(productId).update({
+      'name': name,
+      'price': price,
+      'categoryRef': _firestore.collection('categories').doc(categoryId),
+      'barcode': cleanedBarcode,
+      'imageUrl': imageUrl,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  Future<bool> isBarcodeUnique(String barcode, {String? excludeProductId}) async {
+    final query = _firestore.collection('products')
+      .where('barcode', isEqualTo: barcode.trim().toUpperCase());
+
+    if (excludeProductId != null) {
+      query.where(FieldPath.documentId, isNotEqualTo: excludeProductId);
+    }
+
+    final snapshot = await query.limit(1).get();
+    return snapshot.docs.isEmpty;
+  }
+
+
+
   // Produits
   Future<Product?> getProductByBarcode(String barcode) async {
     final snapshot = await FirebaseFirestore.instance

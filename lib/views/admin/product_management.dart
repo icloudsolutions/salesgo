@@ -9,6 +9,7 @@ import 'package:salesgo/models/product.dart';
 import 'package:salesgo/models/discount.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:salesgo/services/firestore_service.dart';
 
 class ProductManagement extends StatefulWidget {
   const ProductManagement({super.key});
@@ -38,6 +39,10 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
   String? _selectedDiscountCategory;
   DateTime? _discountStartDate;
   DateTime? _discountEndDate;
+
+  final FirestoreService _firestoreService = FirestoreService();
+
+
 
   @override
   void initState() {
@@ -162,81 +167,65 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
   }
 
   Future<void> _addProduct() async {
-    if (_formKey.currentState!.validate()) {
-      setState(() => _isLoading = true);
-      try {
+    if (!_formKey.currentState!.validate()) return;
+    
+    setState(() => _isLoading = true);
+    try {
+      await _firestoreService.addProduct(
+        name: _nameController.text,
+        price: double.parse(_priceController.text),
+        categoryId: _selectedProductCategory!,
+        barcode: _barcodeController.text,
+        imageUrl: _imageUrl,
+      );
 
-        final categoryRef = FirebaseFirestore.instance
-            .collection('categories')
-            .doc(_selectedProductCategory);
-
-        final product = Product(
-          id: FirebaseFirestore.instance.collection('products').doc().id,
-          name: _nameController.text,
-          price: double.parse(_priceController.text),
-          categoryRef: categoryRef, 
-          barcode: _barcodeController.text,
-          imageUrl: _imageUrl,
-        );
-
-        await FirebaseFirestore.instance
-            .collection('products')
-            .doc(product.id)
-            .set(product.toMap());
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Product added successfully')),
-        );
-
-        // Clear form
-        _formKey.currentState!.reset();
-        setState(() {
-          _imageUrl = null;
-          _selectedProductCategory = null;
-        });
-        Navigator.pop(context);
-      } catch (e) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error adding product: $e')),
-        );
-      } finally {
-        setState(() => _isLoading = false);
-      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Product added successfully')),
+      );
+      _resetForm();
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: ${e.toString()}')),
+      );
+    } finally {
+      setState(() => _isLoading = false);
     }
   }
 
   Future<void> _updateProduct(String productId) async {
-    if (_formKey.currentState!.validate()) {
-      setState(() => _isLoading = true);
-      try {
+    if (!_formKey.currentState!.validate()) return;
+    
+    setState(() => _isLoading = true);
+    try {
+      await _firestoreService.updateProduct(
+        productId: productId,
+        name: _nameController.text,
+        price: double.parse(_priceController.text),
+        categoryId: _selectedProductCategory!,
+        barcode: _barcodeController.text,
+        imageUrl: _imageUrl,
+      );
 
-        final categoryRef = FirebaseFirestore.instance
-            .collection('categories')
-            .doc(_selectedProductCategory);
-
-        await FirebaseFirestore.instance
-            .collection('products')
-            .doc(productId)
-            .update({
-              'name': _nameController.text,
-              'price': double.parse(_priceController.text),
-              'categoryRef': categoryRef, // Using DocumentReference
-              'barcode': _barcodeController.text,
-              'imageUrl': _imageUrl,
-            });
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Product updated successfully')),
-        );
-        Navigator.pop(context);
-      } catch (e) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error updating product: $e')),
-        );
-      } finally {
-        setState(() => _isLoading = false);
-      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Product updated successfully')),
+      );
+      Navigator.pop(context);
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: ${e.toString()}')),
+      );
+    } finally {
+      setState(() => _isLoading = false);
     }
+  }
+
+  void _resetForm() {
+    _formKey.currentState?.reset();
+    setState(() {
+      _imageUrl = null;
+      _selectedProductCategory = null;
+      _barcodeController.clear();
+    });
   }
 
   Future<void> _addCategory() async {

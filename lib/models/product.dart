@@ -9,6 +9,8 @@ class Product {
   final String? imageUrl;
   final List<String> availableLocations;
   final DocumentReference? reference;
+  //final DateTime createdAt;
+
  
 
   Product({
@@ -20,6 +22,7 @@ class Product {
     this.imageUrl,
     this.availableLocations = const [],
     this.reference,
+    //required this.createdAt,
 
   });
 
@@ -33,6 +36,7 @@ class Product {
       barcode: data['barcode'] as String? ?? '',
       imageUrl: data['imageUrl'] as String?,
       availableLocations: List<String>.from(data['availableLocations'] ?? []),
+      //createdAt:  (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
 
     );
   }
@@ -45,6 +49,7 @@ class Product {
       categoryRef: map['categoryRef'] as DocumentReference, 
       barcode: map['barcode'] as String? ?? '',
       imageUrl: map['imageUrl'] as String?,
+      //createdAt: (map['createdAt'] as Timestamp?)!.toDate(),
       
     );
   }
@@ -57,6 +62,18 @@ class Product {
     'barcode': barcode,
     'imageUrl': imageUrl, 
     'availableLocations': availableLocations,
+    //'createdAt': FieldValue.serverTimestamp(),
 
   };
+
+  // Add barcode validation method
+  static String? validateBarcode(String? value) {
+    if (value == null || value.isEmpty) return 'Barcode is required';
+    if (value.length < 3) return 'Barcode too short (min 3 chars)';
+    if (!RegExp(r'^[a-zA-Z0-9]+$').hasMatch(value)) {
+      return 'Only alphanumeric characters allowed';
+    }
+    return null;
+  }
+
 }

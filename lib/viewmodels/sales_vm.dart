@@ -83,6 +83,8 @@ class SalesViewModel with ChangeNotifier {
           categoryRef: item.product.categoryRef,
           barcode: item.product.barcode,
           imageUrl: item.product.imageUrl,
+          //createdAt: item.product.createdAt,
+
         );
       }).toList();
 
