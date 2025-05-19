@@ -64,6 +64,7 @@ import 'package:salesgo/views/agent/sales_history_screen.dart';
 import 'package:salesgo/views/agent/stock_screen.dart';
 import 'package:salesgo/views/login_screen.dart';
 import 'widgets/role_based_ui.dart';
+import 'package:salesgo/views/agent/exchange_screen.dart';
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
@@ -82,6 +83,7 @@ class MyApp extends StatelessWidget {
         '/users': (context) => const UsersScreen(),
         '/admin': (context) => const AdminHomeScreen(),
         '/agent': (context) => const AgentHomeScreen(),
+        '/exchange': (context) => const ExchangeScreen(),
       },
     );
   }
@@ -194,6 +196,7 @@ import 'package:salesgo/viewmodels/stock_vm.dart';
 import 'package:salesgo/views/admin/admin_home_screen.dart';
 import 'package:salesgo/views/admin/users_management.dart';
 import 'package:salesgo/views/agent/agent_home_screen.dart';
+import 'package:salesgo/views/agent/exchange_screen.dart';
 import 'package:salesgo/views/agent/sales_history_screen.dart';
 import 'package:salesgo/views/agent/stock_screen.dart';
 import 'package:salesgo/views/signup_screen.dart';
@@ -257,6 +260,7 @@ class MyApp extends StatelessWidget {
             '/users': (context) => const UsersScreen(),
             '/admin': (context) => const AdminHomeScreen(),
             '/agent': (context) => const AgentHomeScreen(),
+            '/exchange': (context) => const ExchangeScreen(),
           },
         );
       },
@@ -5600,6 +5604,7 @@ import 'package:salesgo/viewmodels/stock_vm.dart';
 import 'sales_screen.dart';
 import 'stock_screen.dart';
 import 'sales_history_screen.dart';
+import 'exchange_screen.dart';
 
 class AgentHomeScreen extends StatefulWidget {
   const AgentHomeScreen({super.key});
@@ -5634,6 +5639,7 @@ class _AgentHomeScreenState extends State<AgentHomeScreen> {
     SalesScreen(),
     StockScreen(),
     HistoryScreen(),
+    ExchangeScreen(),
   ];
 
   void _onItemTapped(int index) {
@@ -5668,13 +5674,17 @@ class _AgentHomeScreenState extends State<AgentHomeScreen> {
             label: 'Sales',
           ),
           BottomNavigationBarItem(
-            icon: Icon(Icons.inventory_2),
+            icon: Icon(Icons.inventory_2_outlined),
             label: 'Stock',
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.history),
             label: 'History',
-          ),
+          ),   
+          BottomNavigationBarItem(
+            icon: Icon(Icons.compare_arrows),
+            label: 'Exchange',
+          ),                 
         ],
       ),
     );
@@ -5687,6 +5697,7 @@ views\agent\exchange_screen.dart:
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:salesgo/models/product.dart';
+import 'package:salesgo/viewmodels/auth_vm.dart';
 import 'package:salesgo/viewmodels/refund_vm.dart';
 import 'package:salesgo/widgets/product_picker_dialog.dart';
 
@@ -5713,7 +5724,15 @@ class _ExchangeScreenState extends State<ExchangeScreen> {
   }
 
   void _submitExchange(RefundViewModel vm) async {
-    if (selectedAgentId == null || selectedLocationId == null) {
+    final authVM = Provider.of<AuthViewModel>(context, listen: false);
+
+    final agentId = selectedAgentId ?? authVM.currentUser?.uid;
+    final locationId = selectedLocationId ?? authVM.currentUser?.assignedLocationId;
+
+    print('agentId: $agentId');
+    print('locationId: $locationId');
+
+    if (agentId == null || locationId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Agent and location are required.")),
       );
@@ -5722,8 +5741,8 @@ class _ExchangeScreenState extends State<ExchangeScreen> {
 
     try {
       await vm.processExchange(
-        agentId: selectedAgentId!,
-        locationId: selectedLocationId!,
+        agentId: agentId,
+        locationId: locationId,
         reason: reason,
       );
       ScaffoldMessenger.of(context).showSnackBar(
@@ -5735,6 +5754,7 @@ class _ExchangeScreenState extends State<ExchangeScreen> {
       );
     }
   }
+
 
   @override
   Widget build(BuildContext context) {
@@ -6512,6 +6532,7 @@ import 'package:salesgo/widgets/payment_section.dart';
 import 'package:salesgo/views/agent/sales_history_screen.dart';
 import 'package:salesgo/viewmodels/refund_vm.dart';
 import 'package:salesgo/widgets/refund_product_card.dart';
+import 'package:salesgo/views/agent/exchange_screen.dart';
 
 class SalesScreen extends StatefulWidget {
   const SalesScreen({super.key});
@@ -6531,7 +6552,7 @@ class _SalesScreenState extends State<SalesScreen> with SingleTickerProviderStat
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(length: 4, vsync: this);
     _scannerController.stop(); // Ensure scanner is stopped initially
   }
 
@@ -6556,6 +6577,7 @@ class _SalesScreenState extends State<SalesScreen> with SingleTickerProviderStat
             Tab(icon: Icon(Icons.shopping_cart)),
             Tab(icon: Icon(Icons.history)),
             Tab(icon: Icon(Icons.assignment_return)),
+            Tab(icon: Icon(Icons.swap_horiz)),
           ],
         ),
         actions: [
@@ -6577,6 +6599,8 @@ class _SalesScreenState extends State<SalesScreen> with SingleTickerProviderStat
           
           // Refund Tab
           _buildRefundTab(),
+
+          const ExchangeScreen(),           
         ],
       ),
     );
