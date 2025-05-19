@@ -10,6 +10,7 @@ import 'package:salesgo/models/discount.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:salesgo/services/firestore_service.dart';
+import 'package:salesgo/views/admin/stock_settings_form.dart';
 
 class ProductManagement extends StatefulWidget {
   const ProductManagement({super.key});
@@ -1104,4 +1105,44 @@ Widget _buildDiscountForm({bool isEditing = false, String? discountId}) {
       },
     );
   }
+
+
+
+  Widget _buildProductTile(Product product) {
+    return ListTile(
+      title: Text(product.name),
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('\$${product.price.toStringAsFixed(2)}'),
+          if (product.trackStock)
+            Text(
+              'Stock: ${product.stockQuantity.toStringAsFixed(2)}'
+              ' (min: ${product.minStockLevel.toStringAsFixed(2)})',
+              style: TextStyle(
+                color: product.needsRestock ? Colors.orange : Colors.green,
+              ),
+            ),
+        ],
+      ),
+      trailing: IconButton(
+        icon: Icon(Icons.inventory),
+        onPressed: () => _showStockSettings(product),
+      ),
+    );
+  }
+
+  Future<void> _showStockSettings(Product product) async {
+    final updated = await showDialog<bool>(
+      context: context,
+      builder: (context) => StockSettingsForm(product: product),
+    );
+    
+    if (updated == true) {
+      // Refresh product list
+      setState(() {});
+    }
+  }
+
+
 }

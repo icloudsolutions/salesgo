@@ -83,8 +83,13 @@ class SalesViewModel with ChangeNotifier {
           categoryRef: item.product.categoryRef,
           barcode: item.product.barcode,
           imageUrl: item.product.imageUrl,
-          //createdAt: item.product.createdAt,
-
+          availableLocations: item.product.availableLocations,
+          minStockLevel: item.product.minStockLevel,
+          trackStock: item.product.trackStock,
+          stockQuantity: item.product.stockQuantity,
+          isDeleted: item.product.isDeleted,
+          createdAt: item.product.createdAt,
+          updatedAt: item.product.updatedAt,
         );
       }).toList();
 

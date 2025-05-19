@@ -1,3 +1,4 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:salesgo/models/product.dart';
 import 'package:salesgo/services/firestore_service.dart';
@@ -48,4 +49,74 @@ class RefundViewModel with ChangeNotifier {
       rethrow;
     }
   }
+
+  Product? _originalProduct;
+  Product? _replacementProduct;
+  int _originalQty = 1;
+  int _replacementQty = 1;
+
+  Product? get originalProduct => _originalProduct;
+  Product? get replacementProduct => _replacementProduct;
+  int get originalQty => _originalQty;
+  int get replacementQty => _replacementQty;
+
+  void setOriginalProduct(Product product, int qty) {
+    _originalProduct = product;
+    _originalQty = qty;
+    notifyListeners();
+  }
+
+  void setReplacementProduct(Product product, int qty) {
+    _replacementProduct = product;
+    _replacementQty = qty;
+    notifyListeners();
+  }
+
+  void clearExchange() {
+    _originalProduct = null;
+    _replacementProduct = null;
+    _originalQty = 1;
+    _replacementQty = 1;
+    notifyListeners();
+  }
+
+  double get priceDifference {
+    final oldTotal = (_originalProduct?.price ?? 0.0) * _originalQty;
+    final newTotal = (_replacementProduct?.price ?? 0.0) * _replacementQty;
+    return newTotal - oldTotal;
+  }
+
+  Future<void> processExchange({
+    required String agentId,
+    required String locationId,
+    required String reason,
+  }) async {
+    if (_originalProduct == null || _replacementProduct == null) return;
+
+    final batch = FirebaseFirestore.instance.batch();
+
+    final exchangeRef = FirebaseFirestore.instance.collection('refunds').doc();
+
+    batch.set(exchangeRef, {
+      'type': 'exchange',
+      'agentId': agentId,
+      'locationId': locationId,
+      'date': FieldValue.serverTimestamp(),
+      'reason': reason,
+      'originalProduct': _originalProduct!.toMap()..['quantity'] = _originalQty,
+      'replacementProduct': _replacementProduct!.toMap()..['quantity'] = _replacementQty,
+      'priceDifference': priceDifference,
+    });
+
+    final oldRef = FirebaseFirestore.instance.collection('products').doc(_originalProduct!.id);
+    final newRef = FirebaseFirestore.instance.collection('products').doc(_replacementProduct!.id);
+
+    batch.update(oldRef, {'stockQuantity': FieldValue.increment(_originalQty)});
+    batch.update(newRef, {'stockQuantity': FieldValue.increment(-_replacementQty)});
+
+    await batch.commit();
+    clearExchange();
+  }
+
+
 }

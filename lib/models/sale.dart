@@ -37,18 +37,19 @@ class Sale {
   // Create Sale object from Firestore document
   factory Sale.fromFirestore(DocumentSnapshot<Map<String, dynamic>> doc) {
     final data = doc.data() ?? {};
+
     return Sale(
       id: doc.id,
       agentId: data['agentId'] as String? ?? '',
-      locationId: data['locationId'] ?? '',
+      locationId: data['locationId'] as String? ?? '',
       date: (data['date'] as Timestamp?)?.toDate() ?? DateTime.now(),
-      products: (data['products'] as List?)?.map((p) => 
-        Product.fromMap(p as Map<String, dynamic>, p['id'] as String? ?? '')).toList() ?? [],
+      products: _parseProducts(data['products']),
       totalAmount: (data['totalAmount'] as num?)?.toDouble() ?? 0.0,
       paymentMethod: data['paymentMethod'] as String? ?? '',
       couponCode: data['couponCode'] as String?,
     );
   }
+
 
   static List<Product> _parseProducts(dynamic productsData) {
     if (productsData is! List) return [];

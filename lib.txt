@@ -27,14 +27,17 @@ lib/
 ├── views/
 │   ├── admin/
 │   │   ├── admin_home_screen.dart
+│   │   ├── bulk_stock_settings.dart
 │   │   ├── location_management.dart
 │   │   ├── product_management.dart
 │   │   ├── reports_screen copy.dart
 │   │   ├── reports_screen.dart
 │   │   ├── stock_management.dart
+│   │   ├── stock_settings_form.dart
 │   │   └── users_management.dart
 │   ├── agent/
 │   │   ├── agent_home_screen.dart
+│   │   ├── exchange_screen.dart
 │   │   ├── refund_screen.dart
 │   │   ├── sales_history_screen.dart
 │   │   ├── sales_screen.dart
@@ -45,6 +48,7 @@ lib/
     ├── discount_badge.dart
     ├── payment_section.dart
     ├── product_details_card.dart
+    ├── product_picker_dialog.dart
     ├── refund_product_card.dart
     ├── role_based_ui.dart
     └── sale_item.dart
@@ -60,6 +64,7 @@ import 'package:salesgo/views/agent/sales_history_screen.dart';
 import 'package:salesgo/views/agent/stock_screen.dart';
 import 'package:salesgo/views/login_screen.dart';
 import 'widgets/role_based_ui.dart';
+import 'package:salesgo/views/agent/exchange_screen.dart';
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
@@ -78,6 +83,7 @@ class MyApp extends StatelessWidget {
         '/users': (context) => const UsersScreen(),
         '/admin': (context) => const AdminHomeScreen(),
         '/agent': (context) => const AgentHomeScreen(),
+        '/exchange': (context) => const ExchangeScreen(),
       },
     );
   }
@@ -190,6 +196,7 @@ import 'package:salesgo/viewmodels/stock_vm.dart';
 import 'package:salesgo/views/admin/admin_home_screen.dart';
 import 'package:salesgo/views/admin/users_management.dart';
 import 'package:salesgo/views/agent/agent_home_screen.dart';
+import 'package:salesgo/views/agent/exchange_screen.dart';
 import 'package:salesgo/views/agent/sales_history_screen.dart';
 import 'package:salesgo/views/agent/stock_screen.dart';
 import 'package:salesgo/views/signup_screen.dart';
@@ -253,6 +260,7 @@ class MyApp extends StatelessWidget {
             '/users': (context) => const UsersScreen(),
             '/admin': (context) => const AdminHomeScreen(),
             '/agent': (context) => const AgentHomeScreen(),
+            '/exchange': (context) => const ExchangeScreen(),
           },
         );
       },
@@ -273,6 +281,7 @@ routes.dart:
 
 # routes.dart
 import 'package:salesgo/views/admin/reports_screen.dart';
+import 'package:salesgo/views/agent/exchange_screen.dart';
 
 import 'views/admin/admin_home_screen.dart';
 import 'views/agent/agent_home_screen.dart';
@@ -287,6 +296,7 @@ final appRoutes = {
   '/admin': (context) => const AdminHomeScreen(),
   '/agent': (context) => const AgentHomeScreen(),
   '/reports': (context) => const ReportsScreen(),
+  '/exchange': (context) => const ExchangeScreen(),
 
 };
 
@@ -502,8 +512,12 @@ class Product {
   final String barcode;
   final String? imageUrl;
   final List<String> availableLocations;
-  final DocumentReference? reference;
- 
+  final double stockQuantity;
+  final double minStockLevel;
+  final bool trackStock;
+  final bool isDeleted;
+  final Timestamp createdAt;
+  final Timestamp? updatedAt;
 
   Product({
     required this.id,
@@ -513,46 +527,123 @@ class Product {
     required this.barcode,
     this.imageUrl,
     this.availableLocations = const [],
-    this.reference,
+    this.stockQuantity = 0,
+    this.minStockLevel = 0,
+    this.trackStock = false,
+    this.isDeleted = false,
+    Timestamp? createdAt,
+    this.updatedAt,
+  }) : createdAt = createdAt ?? Timestamp.now();
 
-  });
+  bool get needsRestock => trackStock && stockQuantity <= minStockLevel;
+  bool get isOutOfStock => trackStock && stockQuantity <= 0;
 
   factory Product.fromFirestore(DocumentSnapshot doc) {
-    final data = doc.data() as Map<String, dynamic>? ?? {};
+    try {
+      final data = doc.data() as Map<String, dynamic>? ?? {};
+      return Product(
+        id: doc.id,
+        name: data['name']?.toString() ?? '',
+        price: _parseDouble(data['price']),
+        categoryRef: data['categoryRef'] as DocumentReference,
+        barcode: data['barcode']?.toString() ?? '',
+        imageUrl: data['imageUrl']?.toString(),
+        availableLocations: List<String>.from(data['availableLocations'] ?? []),
+        stockQuantity: _parseDouble(data['stockQuantity']),
+        minStockLevel: _parseDouble(data['minStockLevel']),
+        trackStock: data['trackStock'] as bool? ?? false,
+        isDeleted: data['isDeleted'] as bool? ?? false,
+        createdAt: data['createdAt'] as Timestamp?,
+        updatedAt: data['updatedAt'] as Timestamp?,
+      );
+    } catch (e) {
+      throw FormatException('Failed to parse product: $e');
+    }
+  }
+
+  static double _parseDouble(dynamic value) {
+    if (value == null) return 0.0;
+    if (value is double) return value;
+    if (value is int) return value.toDouble();
+    if (value is String) return double.tryParse(value) ?? 0.0;
+    return 0.0;
+  }
+
+  Map<String, dynamic> toMap() {
+    return {
+      'name': name,
+      'price': price,
+      'categoryRef': categoryRef,
+      'barcode': barcode,
+      'imageUrl': imageUrl,
+      'availableLocations': availableLocations,
+      'stockQuantity': stockQuantity,
+      'minStockLevel': minStockLevel,
+      'trackStock': trackStock,
+      'isDeleted': isDeleted,
+      'createdAt': createdAt,
+      if (updatedAt != null) 'updatedAt': updatedAt,
+    };
+  }
+
+  Product copyWith({
+    String? name,
+    double? price,
+    DocumentReference? categoryRef,
+    String? barcode,
+    String? imageUrl,
+    List<String>? availableLocations,
+    double? stockQuantity,
+    double? minStockLevel,
+    bool? trackStock,
+    bool? isDeleted,
+    Timestamp? updatedAt,
+  }) {
     return Product(
-      id: doc.id,
-      name: data['name'] as String? ?? '',
-      price: (data['price'] as num?)?.toDouble() ?? 0.0,
+      id: id,
+      name: name ?? this.name,
+      price: price ?? this.price,
+      categoryRef: categoryRef ?? this.categoryRef,
+      barcode: barcode ?? this.barcode,
+      imageUrl: imageUrl ?? this.imageUrl,
+      availableLocations: availableLocations ?? this.availableLocations,
+      stockQuantity: stockQuantity ?? this.stockQuantity,
+      minStockLevel: minStockLevel ?? this.minStockLevel,
+      trackStock: trackStock ?? this.trackStock,
+      isDeleted: isDeleted ?? this.isDeleted,
+      createdAt: createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+    );
+  }
+
+  static String? validateBarcode(String? value) {
+    if (value == null || value.isEmpty) return 'Barcode is required';
+    if (value.length < 3) return 'Barcode too short (min 3 chars)';
+    if (!RegExp(r'^[a-zA-Z0-9]+$').hasMatch(value)) {
+      return 'Only alphanumeric characters allowed';
+    }
+    return null;
+  }
+
+  factory Product.fromMap(Map<String, dynamic> data, String id) {
+    return Product(
+      id: id,
+      name: data['name']?.toString() ?? '',
+      price: _parseDouble(data['price']),
       categoryRef: data['categoryRef'] as DocumentReference,
-      barcode: data['barcode'] as String? ?? '',
-      imageUrl: data['imageUrl'] as String?,
+      barcode: data['barcode']?.toString() ?? '',
+      imageUrl: data['imageUrl']?.toString(),
       availableLocations: List<String>.from(data['availableLocations'] ?? []),
-
+      stockQuantity: _parseDouble(data['stockQuantity']),
+      minStockLevel: _parseDouble(data['minStockLevel']),
+      trackStock: data['trackStock'] as bool? ?? false,
+      isDeleted: data['isDeleted'] as bool? ?? false,
+      createdAt: data['createdAt'] as Timestamp? ?? Timestamp.now(),
+      updatedAt: data['updatedAt'] as Timestamp?,
     );
   }
 
-  factory Product.fromMap(Map<String, dynamic> map, String id) {
-    return Product(
-      id: map['id'] as String? ?? '',
-      name: map['name'] as String? ?? '',
-      price: (map['price'] as num?)?.toDouble() ?? 0.0,
-      categoryRef: map['categoryRef'] as DocumentReference, 
-      barcode: map['barcode'] as String? ?? '',
-      imageUrl: map['imageUrl'] as String?,
-      
-    );
-  }
-  
-  Map<String, dynamic> toMap() => {
-    'id': id,
-    'name': name,
-    'price': price,
-    'categoryRef': categoryRef,
-    'barcode': barcode,
-    'imageUrl': imageUrl, 
-    'availableLocations': availableLocations,
 
-  };
 }
 
 models\sale.dart:
@@ -597,18 +688,19 @@ class Sale {
   // Create Sale object from Firestore document
   factory Sale.fromFirestore(DocumentSnapshot<Map<String, dynamic>> doc) {
     final data = doc.data() ?? {};
+
     return Sale(
       id: doc.id,
       agentId: data['agentId'] as String? ?? '',
-      locationId: data['locationId'] ?? '',
+      locationId: data['locationId'] as String? ?? '',
       date: (data['date'] as Timestamp?)?.toDate() ?? DateTime.now(),
-      products: (data['products'] as List?)?.map((p) => 
-        Product.fromMap(p as Map<String, dynamic>, p['id'] as String? ?? '')).toList() ?? [],
+      products: _parseProducts(data['products']),
       totalAmount: (data['totalAmount'] as num?)?.toDouble() ?? 0.0,
       paymentMethod: data['paymentMethod'] as String? ?? '',
       couponCode: data['couponCode'] as String?,
     );
   }
+
 
   static List<Product> _parseProducts(dynamic productsData) {
     if (productsData is! List) return [];
@@ -806,6 +898,78 @@ import '../models/sale.dart';
 class FirestoreService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
+  Future<Product> addProduct({
+    required String name,
+    required double price,
+    required String categoryId,
+    required String barcode,
+    String? imageUrl,
+  }) async {
+    final cleanedBarcode = barcode.trim().toUpperCase();
+    
+    if (!await isBarcodeUnique(cleanedBarcode)) {
+      throw 'Product with barcode "$cleanedBarcode" already exists';
+    }
+
+    final productRef = _firestore.collection('products').doc();
+    final product = Product(
+      id: productRef.id,
+      name: name,
+      price: price,
+      categoryRef: _firestore.collection('categories').doc(categoryId),
+      barcode: cleanedBarcode,
+      imageUrl: imageUrl,
+      createdAt: Timestamp.fromDate(DateTime.now()),
+      updatedAt: Timestamp.fromDate(DateTime.now()),
+      isDeleted: false,
+      availableLocations: [],
+      minStockLevel: 0,
+      trackStock: false,
+      stockQuantity: 0
+    );
+
+    await productRef.set(product.toMap());
+    return product;
+  }
+
+  Future<void> updateProduct({
+    required String productId,
+    required String name,
+    required double price,
+    required String categoryId,
+    required String barcode,
+    String? imageUrl,
+  }) async {
+    final cleanedBarcode = barcode.trim().toUpperCase();
+    
+    if (!await isBarcodeUnique(cleanedBarcode, excludeProductId: productId)) {
+      throw 'Product with barcode "$cleanedBarcode" already exists';
+    }
+
+    await _firestore.collection('products').doc(productId).update({
+      'name': name,
+      'price': price,
+      'categoryRef': _firestore.collection('categories').doc(categoryId),
+      'barcode': cleanedBarcode,
+      'imageUrl': imageUrl,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  Future<bool> isBarcodeUnique(String barcode, {String? excludeProductId}) async {
+    final query = _firestore.collection('products')
+      .where('barcode', isEqualTo: barcode.trim().toUpperCase());
+
+    if (excludeProductId != null) {
+      query.where(FieldPath.documentId, isNotEqualTo: excludeProductId);
+    }
+
+    final snapshot = await query.limit(1).get();
+    return snapshot.docs.isEmpty;
+  }
+
+
+
   // Produits
   Future<Product?> getProductByBarcode(String barcode) async {
     final snapshot = await FirebaseFirestore.instance
@@ -994,6 +1158,42 @@ class FirestoreService {
   Future<void> deleteDiscount(String id) {
     return _firestore.collection('discounts').doc(id).delete();
   }
+
+
+
+  Stream<QuerySnapshot> getProductsNeedingRestock() {
+    return _firestore
+        .collection('products')
+        .where('trackStock', isEqualTo: true)
+        .where('stockQuantity', isLessThanOrEqualTo: FieldPath(['minStockLevel']))
+        .snapshots();
+  }
+
+  Future<void> bulkUpdateMinStockLevel(Map<String, double> updates) async {
+    final batch = _firestore.batch();
+    
+    updates.forEach((productId, minLevel) {
+      final ref = _firestore.collection('products').doc(productId);
+      batch.update(ref, {
+        'minStockLevel': minLevel,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    });
+
+    await batch.commit();
+  }
+
+  Future<void> updateProductStockSettings(Product product) async {
+    final docRef = _firestore.collection('products').doc(product.id);
+    await docRef.update({
+      'trackStock': product.trackStock,
+      'minStockLevel': product.trackStock ? product.minStockLevel : 0,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+
+
 }
 
 
@@ -1268,6 +1468,7 @@ extension on List<Discount> {
 viewmodels\refund_vm.dart:
 
 # viewmodels\refund_vm.dart
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:salesgo/models/product.dart';
 import 'package:salesgo/services/firestore_service.dart';
@@ -1318,6 +1519,76 @@ class RefundViewModel with ChangeNotifier {
       rethrow;
     }
   }
+
+  Product? _originalProduct;
+  Product? _replacementProduct;
+  int _originalQty = 1;
+  int _replacementQty = 1;
+
+  Product? get originalProduct => _originalProduct;
+  Product? get replacementProduct => _replacementProduct;
+  int get originalQty => _originalQty;
+  int get replacementQty => _replacementQty;
+
+  void setOriginalProduct(Product product, int qty) {
+    _originalProduct = product;
+    _originalQty = qty;
+    notifyListeners();
+  }
+
+  void setReplacementProduct(Product product, int qty) {
+    _replacementProduct = product;
+    _replacementQty = qty;
+    notifyListeners();
+  }
+
+  void clearExchange() {
+    _originalProduct = null;
+    _replacementProduct = null;
+    _originalQty = 1;
+    _replacementQty = 1;
+    notifyListeners();
+  }
+
+  double get priceDifference {
+    final oldTotal = (_originalProduct?.price ?? 0.0) * _originalQty;
+    final newTotal = (_replacementProduct?.price ?? 0.0) * _replacementQty;
+    return newTotal - oldTotal;
+  }
+
+  Future<void> processExchange({
+    required String agentId,
+    required String locationId,
+    required String reason,
+  }) async {
+    if (_originalProduct == null || _replacementProduct == null) return;
+
+    final batch = FirebaseFirestore.instance.batch();
+
+    final exchangeRef = FirebaseFirestore.instance.collection('refunds').doc();
+
+    batch.set(exchangeRef, {
+      'type': 'exchange',
+      'agentId': agentId,
+      'locationId': locationId,
+      'date': FieldValue.serverTimestamp(),
+      'reason': reason,
+      'originalProduct': _originalProduct!.toMap()..['quantity'] = _originalQty,
+      'replacementProduct': _replacementProduct!.toMap()..['quantity'] = _replacementQty,
+      'priceDifference': priceDifference,
+    });
+
+    final oldRef = FirebaseFirestore.instance.collection('products').doc(_originalProduct!.id);
+    final newRef = FirebaseFirestore.instance.collection('products').doc(_replacementProduct!.id);
+
+    batch.update(oldRef, {'stockQuantity': FieldValue.increment(_originalQty)});
+    batch.update(newRef, {'stockQuantity': FieldValue.increment(-_replacementQty)});
+
+    await batch.commit();
+    clearExchange();
+  }
+
+
 }
 
 viewmodels\sales_vm.dart:
@@ -1408,6 +1679,13 @@ class SalesViewModel with ChangeNotifier {
           categoryRef: item.product.categoryRef,
           barcode: item.product.barcode,
           imageUrl: item.product.imageUrl,
+          availableLocations: item.product.availableLocations,
+          minStockLevel: item.product.minStockLevel,
+          trackStock: item.product.trackStock,
+          stockQuantity: item.product.stockQuantity,
+          isDeleted: item.product.isDeleted,
+          createdAt: item.product.createdAt,
+          updatedAt: item.product.updatedAt,
         );
       }).toList();
 
@@ -1853,6 +2131,71 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
   }
 }
 
+views\admin\bulk_stock_settings.dart:
+
+# views\admin\bulk_stock_settings.dart
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/material.dart';
+import 'package:salesgo/models/product.dart';
+import 'package:salesgo/services/firestore_service.dart' show FirestoreService;
+
+class BulkStockSettingsScreen extends StatefulWidget {
+  @override
+  _BulkStockSettingsScreenState createState() => _BulkStockSettingsScreenState();
+}
+
+class _BulkStockSettingsScreenState extends State<BulkStockSettingsScreen> {
+  final Map<String, double> _updates = {};
+  final FirestoreService _firestoreService = FirestoreService();
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text('Bulk Stock Settings')),
+      body: StreamBuilder<QuerySnapshot>(
+        stream: _firestoreService.getProductsNeedingRestock(),
+        builder: (context, snapshot) {
+          // Build editable list of products
+          return ListView.builder(
+            itemCount: snapshot.data?.docs.length ?? 0,
+            itemBuilder: (context, index) {
+              final doc = snapshot.data!.docs[index];
+              final product = Product.fromFirestore(doc);
+
+              return ListTile(
+                title: Text(product.name),
+                subtitle: Text('Current min: ${product.minStockLevel}'),
+                trailing: SizedBox(
+                  width: 100,
+                  child: TextFormField(
+                    initialValue: product.minStockLevel.toStringAsFixed(2),
+                    keyboardType: TextInputType.number,
+                    onChanged: (value) => _updates[product.id] = 
+                      double.tryParse(value) ?? product.minStockLevel,
+                  ),
+                ),
+              );
+            },
+          );
+        },
+      ),
+      floatingActionButton: FloatingActionButton(
+        child: Icon(Icons.save),
+        onPressed: () async {
+          try {
+            await _firestoreService.bulkUpdateMinStockLevel(_updates);
+            Navigator.pop(context);
+          } catch (e) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Error saving: ${e.toString()}')),
+            );
+          }
+        },
+      ),
+    );
+  }
+}
+
 views\admin\location_management.dart:
 
 # views\admin\location_management.dart
@@ -2050,6 +2393,8 @@ import 'package:salesgo/models/product.dart';
 import 'package:salesgo/models/discount.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:salesgo/services/firestore_service.dart';
+import 'package:salesgo/views/admin/stock_settings_form.dart';
 
 class ProductManagement extends StatefulWidget {
   const ProductManagement({super.key});
@@ -2079,6 +2424,10 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
   String? _selectedDiscountCategory;
   DateTime? _discountStartDate;
   DateTime? _discountEndDate;
+
+  final FirestoreService _firestoreService = FirestoreService();
+
+
 
   @override
   void initState() {
@@ -2203,81 +2552,65 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
   }
 
   Future<void> _addProduct() async {
-    if (_formKey.currentState!.validate()) {
-      setState(() => _isLoading = true);
-      try {
+    if (!_formKey.currentState!.validate()) return;
+    
+    setState(() => _isLoading = true);
+    try {
+      await _firestoreService.addProduct(
+        name: _nameController.text,
+        price: double.parse(_priceController.text),
+        categoryId: _selectedProductCategory!,
+        barcode: _barcodeController.text,
+        imageUrl: _imageUrl,
+      );
 
-        final categoryRef = FirebaseFirestore.instance
-            .collection('categories')
-            .doc(_selectedProductCategory);
-
-        final product = Product(
-          id: FirebaseFirestore.instance.collection('products').doc().id,
-          name: _nameController.text,
-          price: double.parse(_priceController.text),
-          categoryRef: categoryRef, 
-          barcode: _barcodeController.text,
-          imageUrl: _imageUrl,
-        );
-
-        await FirebaseFirestore.instance
-            .collection('products')
-            .doc(product.id)
-            .set(product.toMap());
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Product added successfully')),
-        );
-
-        // Clear form
-        _formKey.currentState!.reset();
-        setState(() {
-          _imageUrl = null;
-          _selectedProductCategory = null;
-        });
-        Navigator.pop(context);
-      } catch (e) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error adding product: $e')),
-        );
-      } finally {
-        setState(() => _isLoading = false);
-      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Product added successfully')),
+      );
+      _resetForm();
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: ${e.toString()}')),
+      );
+    } finally {
+      setState(() => _isLoading = false);
     }
   }
 
   Future<void> _updateProduct(String productId) async {
-    if (_formKey.currentState!.validate()) {
-      setState(() => _isLoading = true);
-      try {
+    if (!_formKey.currentState!.validate()) return;
+    
+    setState(() => _isLoading = true);
+    try {
+      await _firestoreService.updateProduct(
+        productId: productId,
+        name: _nameController.text,
+        price: double.parse(_priceController.text),
+        categoryId: _selectedProductCategory!,
+        barcode: _barcodeController.text,
+        imageUrl: _imageUrl,
+      );
 
-        final categoryRef = FirebaseFirestore.instance
-            .collection('categories')
-            .doc(_selectedProductCategory);
-
-        await FirebaseFirestore.instance
-            .collection('products')
-            .doc(productId)
-            .update({
-              'name': _nameController.text,
-              'price': double.parse(_priceController.text),
-              'categoryRef': categoryRef, // Using DocumentReference
-              'barcode': _barcodeController.text,
-              'imageUrl': _imageUrl,
-            });
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Product updated successfully')),
-        );
-        Navigator.pop(context);
-      } catch (e) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error updating product: $e')),
-        );
-      } finally {
-        setState(() => _isLoading = false);
-      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Product updated successfully')),
+      );
+      Navigator.pop(context);
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: ${e.toString()}')),
+      );
+    } finally {
+      setState(() => _isLoading = false);
     }
+  }
+
+  void _resetForm() {
+    _formKey.currentState?.reset();
+    setState(() {
+      _imageUrl = null;
+      _selectedProductCategory = null;
+      _barcodeController.clear();
+    });
   }
 
   Future<void> _addCategory() async {
@@ -3156,6 +3489,46 @@ Widget _buildDiscountForm({bool isEditing = false, String? discountId}) {
       },
     );
   }
+
+
+
+  Widget _buildProductTile(Product product) {
+    return ListTile(
+      title: Text(product.name),
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('\$${product.price.toStringAsFixed(2)}'),
+          if (product.trackStock)
+            Text(
+              'Stock: ${product.stockQuantity.toStringAsFixed(2)}'
+              ' (min: ${product.minStockLevel.toStringAsFixed(2)})',
+              style: TextStyle(
+                color: product.needsRestock ? Colors.orange : Colors.green,
+              ),
+            ),
+        ],
+      ),
+      trailing: IconButton(
+        icon: Icon(Icons.inventory),
+        onPressed: () => _showStockSettings(product),
+      ),
+    );
+  }
+
+  Future<void> _showStockSettings(Product product) async {
+    final updated = await showDialog<bool>(
+      context: context,
+      builder: (context) => StockSettingsForm(product: product),
+    );
+    
+    if (updated == true) {
+      // Refresh product list
+      setState(() {});
+    }
+  }
+
+
 }
 
 views\admin\reports_screen copy.dart:
@@ -5068,6 +5441,102 @@ class _StockManagementState extends State<StockManagement> {
 
 }
 
+views\admin\stock_settings_form.dart:
+
+# views\admin\stock_settings_form.dart
+import 'package:flutter/material.dart';
+import 'package:salesgo/models/product.dart';
+import 'package:salesgo/services/firestore_service.dart';
+
+class StockSettingsForm extends StatefulWidget {
+  final Product product;
+
+  StockSettingsForm({required this.product});
+
+  @override
+  _StockSettingsFormState createState() => _StockSettingsFormState();
+}
+
+class _StockSettingsFormState extends State<StockSettingsForm> {
+  final _formKey = GlobalKey<FormState>();
+  late bool _trackStock;
+  late TextEditingController _minStockController;
+
+  @override
+  void initState() {
+    super.initState();
+    _trackStock = widget.product.trackStock;
+    _minStockController = TextEditingController(
+      text: widget.product.minStockLevel.toStringAsFixed(2),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text('Stock Settings'),
+      content: Form(
+        key: _formKey,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SwitchListTile(
+              title: Text('Track Stock'),
+              value: _trackStock,
+              onChanged: (value) => setState(() => _trackStock = value),
+            ),
+            if (_trackStock)
+              TextFormField(
+                controller: _minStockController,
+                decoration: InputDecoration(
+                  labelText: 'Minimum Stock Level',
+                  suffixText: 'units',
+                ),
+                keyboardType: TextInputType.numberWithOptions(decimal: true),
+                validator: (value) {
+                  if (_trackStock && (value == null || value.isEmpty)) {
+                    return 'Required when stock tracking is enabled';
+                  }
+                  return null;
+                },
+              ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: Text('Cancel'),
+        ),
+        ElevatedButton(
+          onPressed: _saveSettings,
+          child: Text('Save'),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _saveSettings() async {
+    if (_formKey.currentState!.validate()) {
+      try {
+        await FirestoreService().updateProductStockSettings(
+          widget.product.copyWith(
+            trackStock: _trackStock,
+            minStockLevel: _trackStock 
+              ? double.parse(_minStockController.text)
+              : 0,
+          ),
+        );
+        Navigator.pop(context, true); // Return success
+      } catch (e) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error saving settings: ${e.toString()}')),
+        );
+      }
+    }
+  }
+}
+
 views\admin\users_management.dart:
 
 # views\admin\users_management.dart
@@ -5135,6 +5604,7 @@ import 'package:salesgo/viewmodels/stock_vm.dart';
 import 'sales_screen.dart';
 import 'stock_screen.dart';
 import 'sales_history_screen.dart';
+import 'exchange_screen.dart';
 
 class AgentHomeScreen extends StatefulWidget {
   const AgentHomeScreen({super.key});
@@ -5169,6 +5639,7 @@ class _AgentHomeScreenState extends State<AgentHomeScreen> {
     SalesScreen(),
     StockScreen(),
     HistoryScreen(),
+    ExchangeScreen(),
   ];
 
   void _onItemTapped(int index) {
@@ -5203,30 +5674,170 @@ class _AgentHomeScreenState extends State<AgentHomeScreen> {
             label: 'Sales',
           ),
           BottomNavigationBarItem(
-            icon: Icon(Icons.inventory_2),
+            icon: Icon(Icons.inventory_2_outlined),
             label: 'Stock',
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.history),
             label: 'History',
-          ),
+          ),   
+          BottomNavigationBarItem(
+            icon: Icon(Icons.compare_arrows),
+            label: 'Exchange',
+          ),                 
         ],
       ),
     );
   }
 }
 
+views\agent\exchange_screen.dart:
+
+# views\agent\exchange_screen.dart
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:salesgo/models/product.dart';
+import 'package:salesgo/viewmodels/auth_vm.dart';
+import 'package:salesgo/viewmodels/refund_vm.dart';
+import 'package:salesgo/widgets/product_picker_dialog.dart';
+
+class ExchangeScreen extends StatefulWidget {
+  const ExchangeScreen({super.key});
+
+  @override
+  State<ExchangeScreen> createState() => _ExchangeScreenState();
+}
+
+class _ExchangeScreenState extends State<ExchangeScreen> {
+  String reason = '';
+  String? selectedAgentId;
+  String? selectedLocationId;
+
+  void _pickProduct(String label, void Function(Product, int) callback) {
+    showDialog(
+      context: context,
+      builder: (_) => ProductPickerDialog(
+        title: label,
+        onProductSelected: callback,
+      ),
+    );
+  }
+
+  void _submitExchange(RefundViewModel vm) async {
+    final authVM = Provider.of<AuthViewModel>(context, listen: false);
+
+    final agentId = selectedAgentId ?? authVM.currentUser?.uid;
+    final locationId = selectedLocationId ?? authVM.currentUser?.assignedLocationId;
+
+    print('agentId: $agentId');
+    print('locationId: $locationId');
+
+    if (agentId == null || locationId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Agent and location are required.")),
+      );
+      return;
+    }
+
+    try {
+      await vm.processExchange(
+        agentId: agentId,
+        locationId: locationId,
+        reason: reason,
+      );
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Exchange successfully recorded.")),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Error: $e")),
+      );
+    }
+  }
+
+
+  @override
+  Widget build(BuildContext context) {
+    final refundVM = Provider.of<RefundViewModel>(context);
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text("Product Exchange"),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.clear),
+            onPressed: refundVM.clearExchange,
+            tooltip: "Reset Exchange",
+          )
+        ],
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          children: [
+            ListTile(
+              title: Text(refundVM.originalProduct?.name ?? 'Select original product'),
+              subtitle: refundVM.originalProduct != null
+                  ? Text('Qty: ${refundVM.originalQty} - \$${(refundVM.originalProduct!.price * refundVM.originalQty).toStringAsFixed(2)}')
+                  : null,
+              trailing: const Icon(Icons.search),
+              onTap: () => _pickProduct("Select Original Product", refundVM.setOriginalProduct),
+            ),
+            const SizedBox(height: 10),
+            ListTile(
+              title: Text(refundVM.replacementProduct?.name ?? 'Select replacement product'),
+              subtitle: refundVM.replacementProduct != null
+                  ? Text('Qty: ${refundVM.replacementQty} - \$${(refundVM.replacementProduct!.price * refundVM.replacementQty).toStringAsFixed(2)}')
+                  : null,
+              trailing: const Icon(Icons.search),
+              onTap: () => _pickProduct("Select Replacement Product", refundVM.setReplacementProduct),
+            ),
+            const Divider(height: 30),
+            ListTile(
+              title: const Text("Price Difference"),
+              trailing: Text(
+                '${refundVM.priceDifference >= 0 ? '+' : ''}${refundVM.priceDifference.toStringAsFixed(2)}',
+                style: TextStyle(
+                  color: refundVM.priceDifference > 0
+                      ? Colors.red
+                      : refundVM.priceDifference < 0
+                          ? Colors.green
+                          : Colors.grey,
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              decoration: const InputDecoration(
+                labelText: "Reason for exchange",
+                border: OutlineInputBorder(),
+              ),
+              maxLines: 2,
+              onChanged: (value) => setState(() => reason = value),
+            ),
+            const SizedBox(height: 20),
+            ElevatedButton.icon(
+              onPressed: () => _submitExchange(refundVM),
+              icon: const Icon(Icons.check),
+              label: const Text("Confirm Exchange"),
+              style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+
 views\agent\refund_screen.dart:
 
 # views\agent\refund_screen.dart
 import 'package:flutter/material.dart';
-import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:provider/provider.dart';
-import 'package:salesgo/services/firestore_service.dart';
-import 'package:salesgo/viewmodels/auth_vm.dart';
+import 'package:salesgo/models/product.dart';
 import 'package:salesgo/viewmodels/refund_vm.dart';
-import 'package:salesgo/widgets/product_details_card.dart';
-import 'package:salesgo/widgets/refund_product_card.dart';
+import 'package:salesgo/widgets/product_picker_dialog.dart';
 
 class RefundScreen extends StatefulWidget {
   const RefundScreen({super.key});
@@ -5235,229 +5846,154 @@ class RefundScreen extends StatefulWidget {
   State<RefundScreen> createState() => _RefundScreenState();
 }
 
-class _RefundScreenState extends State<RefundScreen> {
-  final MobileScannerController _scannerController = MobileScannerController();
-  final FirestoreService _firestoreService = FirestoreService();
-  bool _isScanning = false;
-  bool _isProcessingRefund = false;
-  bool _hasScanned = false;
+class _RefundScreenState extends State<RefundScreen> with SingleTickerProviderStateMixin {
+  late TabController _tabController;
+  late RefundViewModel refundVM;
+  String reason = '';
+  String? selectedLocationId;
+  String? selectedAgentId;
 
   @override
-  void dispose() {
-    _scannerController.dispose();
-    super.dispose();
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 2, vsync: this);
+    refundVM = Provider.of<RefundViewModel>(context, listen: false);
   }
+
+  void _processRefund() async {
+    try {
+      await refundVM.processRefund(
+        agentId: selectedAgentId ?? '',
+        locationId: selectedLocationId ?? '',
+      );
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Refund completed successfully')),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Refund failed: $e')),
+      );
+    }
+  }
+
+
 
   @override
   Widget build(BuildContext context) {
     final refundVM = Provider.of<RefundViewModel>(context);
-    final authVM = Provider.of<AuthViewModel>(context, listen: false);
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Process Refund'),
-        actions: [
-          IconButton(
-            icon: Icon(_isScanning ? Icons.no_photography : Icons.qr_code_scanner),
-            onPressed: _toggleScanning,
-          ),
-        ],
+        title: const Text("Refund & Exchange"),
+        bottom: TabBar(
+          controller: _tabController,
+          tabs: const [
+            Tab(text: "Refund"),
+            Tab(text: "Exchange"),
+          ],
+        ),
       ),
-      body: Stack(
+      body: TabBarView(
+        controller: _tabController,
         children: [
-          Column(
-            children: [
-              if (_isScanning) _buildScannerSection(context, refundVM),
-              Expanded(
-                child: ListView.builder(
-                  itemCount: refundVM.refundItems.length,
-                  itemBuilder: (context, index) => RefundProductCard(
-                    product: refundVM.refundItems[index],
-                    onRemove: () {
-                      refundVM.removeFromRefund(index);
-                      if (refundVM.refundItems.isEmpty) {
-                        setState(() => _hasScanned = false);
-                      }
-                    },
-                  ),
-                ),
-              ),
-              if (refundVM.refundItems.isNotEmpty)
-                _buildRefundControls(context, refundVM, authVM),
-            ],
-          ),
-          if (_isProcessingRefund)
-            const Center(child: CircularProgressIndicator()),
+          _buildRefundTab(refundVM),
+          _buildExchangeTab(refundVM),
         ],
+      ),
+      bottomNavigationBar: Padding(
+        padding: const EdgeInsets.all(12.0),
+        child: ElevatedButton(
+          onPressed: _processRefund,
+          child: const Text('Submit'),
+        ),
       ),
     );
   }
 
-  Widget _buildScannerSection(BuildContext context, RefundViewModel refundVM) {
-    return Container(
-      height: 200,
-      decoration: BoxDecoration(
-        border: Border.all(color: Colors.grey),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: MobileScanner(
-        controller: _scannerController,
-        onDetect: (capture) {
-          if (!_hasScanned) {
-            _handleBarcodeScan(capture, context, refundVM);
-          }
-        },
-      ),
-    );
-  }
-
-  Widget _buildRefundControls(BuildContext context, RefundViewModel refundVM, AuthViewModel authVM) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.1),
-            blurRadius: 8,
-            offset: const Offset(0, -4),
+  Widget _buildRefundTab(RefundViewModel vm) {
+    return ListView.builder(
+      itemCount: vm.refundItems.length,
+      itemBuilder: (context, index) {
+        final product = vm.refundItems[index];
+        return ListTile(
+          title: Text(product.name),
+          subtitle: Text("Refund: ${product.price.toStringAsFixed(2)}"),
+          trailing: IconButton(
+            icon: const Icon(Icons.remove_circle),
+            onPressed: () => vm.removeFromRefund(index),
           ),
-        ],
-      ),
-      child: Column(
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text('Total Refund:', style: TextStyle(fontSize: 18)),
-              Text(
-                '€${refundVM.totalRefundAmount.toStringAsFixed(2)}',
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: () => refundVM.clearRefund(),
-                  child: const Text('Clear'),
-                ),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.red, // Red color for refund action
-                  ),
-                  onPressed: () => _processRefund(context, refundVM, authVM),
-                  child: const Text('Process Refund'),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _handleBarcodeScan(
-    BarcodeCapture capture,
-    BuildContext context,
-    RefundViewModel refundVM,
-  ) async {
-    if (capture.barcodes.isEmpty || _hasScanned) return;
-
-    final barcode = capture.barcodes.first.rawValue;
-    if (barcode == null) return;
-
-    setState(() {
-      _hasScanned = true;
-      _isScanning = false;
-    });
-    _scannerController.stop();
-
-    try {
-      final product = await _firestoreService.getProductByBarcode(barcode);
-      if (product == null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Product not found')),
         );
-        setState(() => _hasScanned = false);
-        return;
-      }
-
-      refundVM.addToRefund(product);
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: ${e.toString()}')),
-      );
-      setState(() => _hasScanned = false);
-    }
+      },
+    );
   }
 
-  void _toggleScanning() {
-    setState(() {
-      _isScanning = !_isScanning;
-      if (_isScanning) {
-        _hasScanned = false;
-        _scannerController.start();
-      } else {
-        _scannerController.stop();
-      }
-    });
+  void _pickProduct(String label, void Function(Product, int) callback) {
+    showDialog(
+      context: context,
+      builder: (_) => ProductPickerDialog(
+        title: label,
+        onProductSelected: callback,
+      ),
+    );
   }
 
-  Future<void> _processRefund(
-    BuildContext context,
-    RefundViewModel refundVM,
-    AuthViewModel authVM,
-  ) async {
-    if (authVM.currentUser == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('User not authenticated')),
-      );
-      return;
-    }
-
-    if (refundVM.refundItems.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No items to refund')),
-      );
-      return;
-    }
-
-    setState(() => _isProcessingRefund = true);
-
-    try {
-      // Implement your refund logic here
-      // Example: await _firestoreService.processRefund(...);
-      
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Refund processed successfully!')),
-      );
-
-      refundVM.clearRefund();
-      setState(() {
-        _isScanning = true;
-        _isProcessingRefund = false;
-        _hasScanned = false;
-      });
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error processing refund: ${e.toString()}')),
-      );
-    } finally {
-      if (mounted) {
-        setState(() => _isProcessingRefund = false);
-      }
-    }
+  Widget _buildExchangeTab(RefundViewModel vm) {
+    return Column(
+      children: [
+        ListTile(
+          title: Text(vm.originalProduct?.name ?? 'Select original product'),
+          subtitle: vm.originalProduct != null
+              ? Text('Qty: ${vm.originalQty} - \$${(vm.originalProduct!.price * vm.originalQty).toStringAsFixed(2)}')
+              : null,
+          trailing: const Icon(Icons.search),
+          onTap: () {
+            _pickProduct('Select Original Product', vm.setOriginalProduct);
+          },
+        ),
+        ListTile(
+          title: Text(vm.replacementProduct?.name ?? 'Select replacement product'),
+          subtitle: vm.replacementProduct != null
+              ? Text('Qty: ${vm.replacementQty} - \$${(vm.replacementProduct!.price * vm.replacementQty).toStringAsFixed(2)}')
+              : null,
+          trailing: const Icon(Icons.search),
+          onTap: () {
+            _pickProduct('Select Replacement Product', vm.setReplacementProduct);
+          },
+        ),
+        const Divider(),
+        ListTile(
+          title: const Text('Price Difference'),
+          trailing: Text('${vm.priceDifference.toStringAsFixed(2)}'),
+        ),
+        Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: TextField(
+            decoration: const InputDecoration(labelText: 'Reason for exchange'),
+            onChanged: (value) => reason = value,
+          ),
+        ),
+        ElevatedButton.icon(
+          icon: const Icon(Icons.check),
+          label: const Text('Confirm Exchange'),
+          onPressed: () async {
+            try {
+              await vm.processExchange(
+                agentId: selectedAgentId ?? '',
+                locationId: selectedLocationId ?? '',
+                reason: reason,
+              );
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Exchange recorded.")));
+            } catch (e) {
+              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e")));
+            }
+          },
+        )
+      ],
+    );
   }
+
 }
+
 
 views\agent\sales_history_screen.dart:
 
@@ -5996,6 +6532,7 @@ import 'package:salesgo/widgets/payment_section.dart';
 import 'package:salesgo/views/agent/sales_history_screen.dart';
 import 'package:salesgo/viewmodels/refund_vm.dart';
 import 'package:salesgo/widgets/refund_product_card.dart';
+import 'package:salesgo/views/agent/exchange_screen.dart';
 
 class SalesScreen extends StatefulWidget {
   const SalesScreen({super.key});
@@ -6015,7 +6552,7 @@ class _SalesScreenState extends State<SalesScreen> with SingleTickerProviderStat
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(length: 4, vsync: this);
     _scannerController.stop(); // Ensure scanner is stopped initially
   }
 
@@ -6040,6 +6577,7 @@ class _SalesScreenState extends State<SalesScreen> with SingleTickerProviderStat
             Tab(icon: Icon(Icons.shopping_cart)),
             Tab(icon: Icon(Icons.history)),
             Tab(icon: Icon(Icons.assignment_return)),
+            Tab(icon: Icon(Icons.swap_horiz)),
           ],
         ),
         actions: [
@@ -6061,6 +6599,8 @@ class _SalesScreenState extends State<SalesScreen> with SingleTickerProviderStat
           
           // Refund Tab
           _buildRefundTab(),
+
+          const ExchangeScreen(),           
         ],
       ),
     );
@@ -7182,6 +7722,150 @@ class _ProductDetailsCardState extends State<ProductDetailsCard> {
     return discount.type == '%'
         ? basePrice * (1 - discount.value / 100)
         : basePrice - discount.value;
+  }
+}
+
+
+widgets\product_picker_dialog.dart:
+
+# widgets\product_picker_dialog.dart
+import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:salesgo/models/product.dart';
+
+class ProductPickerDialog extends StatefulWidget {
+  final void Function(Product product, int quantity) onProductSelected;
+  final String? title;
+
+  const ProductPickerDialog({
+    super.key,
+    required this.onProductSelected,
+    this.title,
+  });
+
+  @override
+  State<ProductPickerDialog> createState() => _ProductPickerDialogState();
+}
+
+class _ProductPickerDialogState extends State<ProductPickerDialog> {
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
+  final Map<String, int> _selectedQuantities = {};
+
+  Stream<QuerySnapshot<Map<String, dynamic>>> _getProductStream() {
+    final ref = FirebaseFirestore.instance.collection('products');
+    if (_searchQuery.trim().isEmpty) {
+      return ref.limit(30).snapshots();
+    }
+    return ref
+        .where('name', isGreaterThanOrEqualTo: _searchQuery)
+        .where('name', isLessThanOrEqualTo: '$_searchQuery\uf8ff')
+        .limit(30)
+        .snapshots();
+  }
+
+  void _onSelect(Product product) {
+    final quantity = _selectedQuantities[product.id] ?? 1;
+    widget.onProductSelected(product, quantity);
+    Navigator.pop(context);
+  }
+
+  Widget _quantitySelector(String productId) {
+    final quantity = _selectedQuantities[productId] ?? 1;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        IconButton(
+          icon: const Icon(Icons.remove_circle_outline),
+          onPressed: quantity > 1
+              ? () => setState(() => _selectedQuantities[productId] = quantity - 1)
+              : null,
+        ),
+        Text('$quantity', style: const TextStyle(fontWeight: FontWeight.bold)),
+        IconButton(
+          icon: const Icon(Icons.add_circle_outline),
+          onPressed: () => setState(() => _selectedQuantities[productId] = quantity + 1),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildStockStatus(Product product) {
+    if (product.trackStock && product.stockQuantity <= product.minStockLevel) {
+      return const Text(
+        '⚠️ Low Stock',
+        style: TextStyle(color: Colors.redAccent, fontSize: 12),
+      );
+    }
+    return Text('Stock: ${product.stockQuantity.toStringAsFixed(0)}');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(widget.title ?? 'Select Product'),
+      content: SizedBox(
+        width: double.maxFinite,
+        height: 500,
+        child: Column(
+          children: [
+            TextField(
+              controller: _searchController,
+              decoration: const InputDecoration(
+                labelText: 'Search',
+                prefixIcon: Icon(Icons.search),
+              ),
+              onChanged: (value) => setState(() => _searchQuery = value),
+            ),
+            const SizedBox(height: 12),
+            Expanded(
+              child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                stream: _getProductStream(),
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+                  if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                    return const Center(child: Text('No products found.'));
+                  }
+
+                  final products = snapshot.data!.docs
+                      .map((doc) => Product.fromFirestore(doc))
+                      .toList();
+
+                  return ListView.builder(
+                    itemCount: products.length,
+                    itemBuilder: (context, index) {
+                      final product = products[index];
+                      _selectedQuantities.putIfAbsent(product.id, () => 1);
+
+                      return ListTile(
+                        title: Text(product.name),
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            _buildStockStatus(product),
+                            Text('Price: \$${product.price.toStringAsFixed(2)}'),
+                          ],
+                        ),
+                        trailing: _quantitySelector(product.id),
+                        onTap: () => _onSelect(product),
+                      );
+                    },
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          child: const Text("Cancel"),
+          onPressed: () => Navigator.pop(context),
+        ),
+      ],
+    );
   }
 }
 

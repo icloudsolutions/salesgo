@@ -6,6 +6,7 @@ import 'package:salesgo/viewmodels/stock_vm.dart';
 import 'sales_screen.dart';
 import 'stock_screen.dart';
 import 'sales_history_screen.dart';
+import 'exchange_screen.dart';
 
 class AgentHomeScreen extends StatefulWidget {
   const AgentHomeScreen({super.key});
@@ -40,6 +41,7 @@ class _AgentHomeScreenState extends State<AgentHomeScreen> {
     SalesScreen(),
     StockScreen(),
     HistoryScreen(),
+    ExchangeScreen(),
   ];
 
   void _onItemTapped(int index) {
@@ -74,13 +76,17 @@ class _AgentHomeScreenState extends State<AgentHomeScreen> {
             label: 'Sales',
           ),
           BottomNavigationBarItem(
-            icon: Icon(Icons.inventory_2),
+            icon: Icon(Icons.inventory_2_outlined),
             label: 'Stock',
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.history),
             label: 'History',
-          ),
+          ),   
+          BottomNavigationBarItem(
+            icon: Icon(Icons.compare_arrows),
+            label: 'Exchange',
+          ),                 
         ],
       ),
     );

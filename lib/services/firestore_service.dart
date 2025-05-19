@@ -28,7 +28,13 @@ class FirestoreService {
       categoryRef: _firestore.collection('categories').doc(categoryId),
       barcode: cleanedBarcode,
       imageUrl: imageUrl,
-
+      createdAt: Timestamp.fromDate(DateTime.now()),
+      updatedAt: Timestamp.fromDate(DateTime.now()),
+      isDeleted: false,
+      availableLocations: [],
+      minStockLevel: 0,
+      trackStock: false,
+      stockQuantity: 0
     );
 
     await productRef.set(product.toMap());
@@ -261,6 +267,42 @@ class FirestoreService {
   Future<void> deleteDiscount(String id) {
     return _firestore.collection('discounts').doc(id).delete();
   }
+
+
+
+  Stream<QuerySnapshot> getProductsNeedingRestock() {
+    return _firestore
+        .collection('products')
+        .where('trackStock', isEqualTo: true)
+        .where('stockQuantity', isLessThanOrEqualTo: FieldPath(['minStockLevel']))
+        .snapshots();
+  }
+
+  Future<void> bulkUpdateMinStockLevel(Map<String, double> updates) async {
+    final batch = _firestore.batch();
+    
+    updates.forEach((productId, minLevel) {
+      final ref = _firestore.collection('products').doc(productId);
+      batch.update(ref, {
+        'minStockLevel': minLevel,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    });
+
+    await batch.commit();
+  }
+
+  Future<void> updateProductStockSettings(Product product) async {
+    final docRef = _firestore.collection('products').doc(product.id);
+    await docRef.update({
+      'trackStock': product.trackStock,
+      'minStockLevel': product.trackStock ? product.minStockLevel : 0,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+
+
 }
 
 

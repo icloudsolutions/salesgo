@@ -9,6 +9,7 @@ import 'package:salesgo/widgets/payment_section.dart';
 import 'package:salesgo/views/agent/sales_history_screen.dart';
 import 'package:salesgo/viewmodels/refund_vm.dart';
 import 'package:salesgo/widgets/refund_product_card.dart';
+import 'package:salesgo/views/agent/exchange_screen.dart';
 
 class SalesScreen extends StatefulWidget {
   const SalesScreen({super.key});
@@ -28,7 +29,7 @@ class _SalesScreenState extends State<SalesScreen> with SingleTickerProviderStat
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(length: 4, vsync: this);
     _scannerController.stop(); // Ensure scanner is stopped initially
   }
 
@@ -53,6 +54,7 @@ class _SalesScreenState extends State<SalesScreen> with SingleTickerProviderStat
             Tab(icon: Icon(Icons.shopping_cart)),
             Tab(icon: Icon(Icons.history)),
             Tab(icon: Icon(Icons.assignment_return)),
+            Tab(icon: Icon(Icons.swap_horiz)),
           ],
         ),
         actions: [
@@ -74,6 +76,8 @@ class _SalesScreenState extends State<SalesScreen> with SingleTickerProviderStat
           
           // Refund Tab
           _buildRefundTab(),
+
+          const ExchangeScreen(),           
         ],
       ),
     );

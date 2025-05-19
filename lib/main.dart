@@ -9,6 +9,7 @@ import 'package:salesgo/viewmodels/stock_vm.dart';
 import 'package:salesgo/views/admin/admin_home_screen.dart';
 import 'package:salesgo/views/admin/users_management.dart';
 import 'package:salesgo/views/agent/agent_home_screen.dart';
+import 'package:salesgo/views/agent/exchange_screen.dart';
 import 'package:salesgo/views/agent/sales_history_screen.dart';
 import 'package:salesgo/views/agent/stock_screen.dart';
 import 'package:salesgo/views/signup_screen.dart';
@@ -72,6 +73,7 @@ class MyApp extends StatelessWidget {
             '/users': (context) => const UsersScreen(),
             '/admin': (context) => const AdminHomeScreen(),
             '/agent': (context) => const AgentHomeScreen(),
+            '/exchange': (context) => const ExchangeScreen(),
           },
         );
       },

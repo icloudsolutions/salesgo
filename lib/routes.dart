@@ -1,4 +1,5 @@
 import 'package:salesgo/views/admin/reports_screen.dart';
+import 'package:salesgo/views/agent/exchange_screen.dart';
 
 import 'views/admin/admin_home_screen.dart';
 import 'views/agent/agent_home_screen.dart';
@@ -13,5 +14,6 @@ final appRoutes = {
   '/admin': (context) => const AdminHomeScreen(),
   '/agent': (context) => const AgentHomeScreen(),
   '/reports': (context) => const ReportsScreen(),
+  '/exchange': (context) => const ExchangeScreen(),
 
 };

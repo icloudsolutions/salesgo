@@ -6,6 +6,7 @@ import 'package:salesgo/views/agent/sales_history_screen.dart';
 import 'package:salesgo/views/agent/stock_screen.dart';
 import 'package:salesgo/views/login_screen.dart';
 import 'widgets/role_based_ui.dart';
+import 'package:salesgo/views/agent/exchange_screen.dart';
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
@@ -24,6 +25,7 @@ class MyApp extends StatelessWidget {
         '/users': (context) => const UsersScreen(),
         '/admin': (context) => const AdminHomeScreen(),
         '/agent': (context) => const AgentHomeScreen(),
+        '/exchange': (context) => const ExchangeScreen(),
       },
     );
   }
