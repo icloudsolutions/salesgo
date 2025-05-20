@@ -218,7 +218,7 @@ class FirestoreService {
       final productRef = FirebaseFirestore.instance
           .collection('locations')
           .doc(locationId)
-          .collection('products')
+          .collection('stock')
           .doc(productId);
 
       batch.update(productRef, {
