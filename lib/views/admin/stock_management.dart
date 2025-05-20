@@ -334,7 +334,7 @@ class _StockManagementState extends State<StockManagement> {
                         Expanded(
                           child: StreamBuilder<QuerySnapshot>(
                             stream: FirebaseFirestore.instance
-                                .collection('stockHistory')
+                                .collection(' ')
                                 .orderBy('timestamp', descending: true)
                                 .snapshots(),
                             builder: (context, snapshot) {

@@ -503,6 +503,8 @@ class Product {
   final String? imageUrl;
   final List<String> availableLocations;
   final DocumentReference? reference;
+  //final DateTime createdAt;
+
  
 
   Product({
@@ -514,6 +516,7 @@ class Product {
     this.imageUrl,
     this.availableLocations = const [],
     this.reference,
+    //required this.createdAt,
 
   });
 
@@ -527,6 +530,7 @@ class Product {
       barcode: data['barcode'] as String? ?? '',
       imageUrl: data['imageUrl'] as String?,
       availableLocations: List<String>.from(data['availableLocations'] ?? []),
+      //createdAt:  (data['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
 
     );
   }
@@ -539,6 +543,7 @@ class Product {
       categoryRef: map['categoryRef'] as DocumentReference, 
       barcode: map['barcode'] as String? ?? '',
       imageUrl: map['imageUrl'] as String?,
+      //createdAt: (map['createdAt'] as Timestamp?)!.toDate(),
       
     );
   }
@@ -551,8 +556,20 @@ class Product {
     'barcode': barcode,
     'imageUrl': imageUrl, 
     'availableLocations': availableLocations,
+    //'createdAt': FieldValue.serverTimestamp(),
 
   };
+
+  // Add barcode validation method
+  static String? validateBarcode(String? value) {
+    if (value == null || value.isEmpty) return 'Barcode is required';
+    if (value.length < 3) return 'Barcode too short (min 3 chars)';
+    if (!RegExp(r'^[a-zA-Z0-9]+$').hasMatch(value)) {
+      return 'Only alphanumeric characters allowed';
+    }
+    return null;
+  }
+
 }
 
 models\sale.dart:
@@ -570,6 +587,9 @@ class Sale {
   final double totalAmount;
   final String paymentMethod;
   final String? couponCode;
+  final bool refunded;
+  final DateTime? refundDate;
+  final String? refundBy;
 
   Sale({
     required this.id,
@@ -580,6 +600,9 @@ class Sale {
     required this.totalAmount,
     required this.paymentMethod,
     this.couponCode,
+    this.refunded = false,
+    this.refundDate,
+    this.refundBy,
   });
 
   // Convert Sale object to Map for Firestore
@@ -600,13 +623,16 @@ class Sale {
     return Sale(
       id: doc.id,
       agentId: data['agentId'] as String? ?? '',
-      locationId: data['locationId'] ?? '',
+      locationId: data['locationId'] as String? ?? '',
       date: (data['date'] as Timestamp?)?.toDate() ?? DateTime.now(),
       products: (data['products'] as List?)?.map((p) => 
         Product.fromMap(p as Map<String, dynamic>, p['id'] as String? ?? '')).toList() ?? [],
       totalAmount: (data['totalAmount'] as num?)?.toDouble() ?? 0.0,
       paymentMethod: data['paymentMethod'] as String? ?? '',
       couponCode: data['couponCode'] as String?,
+      refunded: data['refunded'] as bool? ?? false,
+      refundDate: (data['refundDate'] as Timestamp?)?.toDate(),
+      refundBy: data['refundBy'] as String?,
     );
   }
 
@@ -806,6 +832,72 @@ import '../models/sale.dart';
 class FirestoreService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
+  Future<Product> addProduct({
+    required String name,
+    required double price,
+    required String categoryId,
+    required String barcode,
+    String? imageUrl,
+  }) async {
+    final cleanedBarcode = barcode.trim().toUpperCase();
+    
+    if (!await isBarcodeUnique(cleanedBarcode)) {
+      throw 'Product with barcode "$cleanedBarcode" already exists';
+    }
+
+    final productRef = _firestore.collection('products').doc();
+    final product = Product(
+      id: productRef.id,
+      name: name,
+      price: price,
+      categoryRef: _firestore.collection('categories').doc(categoryId),
+      barcode: cleanedBarcode,
+      imageUrl: imageUrl,
+
+    );
+
+    await productRef.set(product.toMap());
+    return product;
+  }
+
+  Future<void> updateProduct({
+    required String productId,
+    required String name,
+    required double price,
+    required String categoryId,
+    required String barcode,
+    String? imageUrl,
+  }) async {
+    final cleanedBarcode = barcode.trim().toUpperCase();
+    
+    if (!await isBarcodeUnique(cleanedBarcode, excludeProductId: productId)) {
+      throw 'Product with barcode "$cleanedBarcode" already exists';
+    }
+
+    await _firestore.collection('products').doc(productId).update({
+      'name': name,
+      'price': price,
+      'categoryRef': _firestore.collection('categories').doc(categoryId),
+      'barcode': cleanedBarcode,
+      'imageUrl': imageUrl,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  Future<bool> isBarcodeUnique(String barcode, {String? excludeProductId}) async {
+    final query = _firestore.collection('products')
+      .where('barcode', isEqualTo: barcode.trim().toUpperCase());
+
+    if (excludeProductId != null) {
+      query.where(FieldPath.documentId, isNotEqualTo: excludeProductId);
+    }
+
+    final snapshot = await query.limit(1).get();
+    return snapshot.docs.isEmpty;
+  }
+
+
+
   // Produits
   Future<Product?> getProductByBarcode(String barcode) async {
     final snapshot = await FirebaseFirestore.instance
@@ -929,40 +1021,55 @@ class FirestoreService {
     }
   }
 
+  // Add this to your FirestoreService class
   Future<void> processRefund({
     required List<Product> products,
     required String agentId,
     required String locationId,
   }) async {
-    try {
-      final batch = FirebaseFirestore.instance.batch();
-      final refundDoc = FirebaseFirestore.instance.collection('refunds').doc();
+    final batch = FirebaseFirestore.instance.batch();
+    
+    // Group products by ID to handle quantity properly
+    final productQuantities = <String, int>{};
+    for (final product in products) {
+      productQuantities.update(product.id, (value) => value + 1, ifAbsent: () => 1);
+    }
+
+    // Update stock for each product
+    for (final entry in productQuantities.entries) {
+      final productId = entry.key;
+      final quantity = entry.value;
       
-      // Create refund record
-      batch.set(refundDoc, {
-        'products': products.map((p) => p.toMap()).toList(),
-        'totalAmount': products.fold(0.0, (sum, p) => sum + p.price),
-        'agentId': agentId,
-        'locationId': locationId,
-        'date': FieldValue.serverTimestamp(),
-        'status': 'completed',
+      final productRef = FirebaseFirestore.instance
+          .collection('locations')
+          .doc(locationId)
+          .collection('products')
+          .doc(productId);
+
+      // Atomically increment the stock
+      batch.update(productRef, {
+        'stock': FieldValue.increment(quantity),
+        'lastUpdated': FieldValue.serverTimestamp(),
       });
 
-      // Update inventory for each product
-      for (final product in products) {
-        final productRef = FirebaseFirestore.instance
-            .collection('products')
-            .doc(product.id);
-        
-        batch.update(productRef, {
-          'stock': FieldValue.increment(1),
-        });
-      }
-
-      await batch.commit();
-    } catch (e) {
-      throw Exception('Failed to process refund: $e');
+      // Add to inventory log
+      final logRef = FirebaseFirestore.instance
+          .collection('locations')
+          .doc(locationId)
+          .collection('inventoryLogs')
+          .doc();
+      
+      batch.set(logRef, {
+        'productId': productId,
+        'quantity': quantity,
+        'type': 'refund',
+        'agentId': agentId,
+        'timestamp': FieldValue.serverTimestamp(),
+        'notes': 'Refund processed',
+      });
     }
+
+    await batch.commit();
   }
 
   // Categories
@@ -1408,6 +1515,8 @@ class SalesViewModel with ChangeNotifier {
           categoryRef: item.product.categoryRef,
           barcode: item.product.barcode,
           imageUrl: item.product.imageUrl,
+          //createdAt: item.product.createdAt,
+
         );
       }).toList();
 
@@ -2050,6 +2159,7 @@ import 'package:salesgo/models/product.dart';
 import 'package:salesgo/models/discount.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:salesgo/services/firestore_service.dart';
 
 class ProductManagement extends StatefulWidget {
   const ProductManagement({super.key});
@@ -2079,6 +2189,10 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
   String? _selectedDiscountCategory;
   DateTime? _discountStartDate;
   DateTime? _discountEndDate;
+
+  final FirestoreService _firestoreService = FirestoreService();
+
+
 
   @override
   void initState() {
@@ -2203,81 +2317,65 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
   }
 
   Future<void> _addProduct() async {
-    if (_formKey.currentState!.validate()) {
-      setState(() => _isLoading = true);
-      try {
+    if (!_formKey.currentState!.validate()) return;
+    
+    setState(() => _isLoading = true);
+    try {
+      await _firestoreService.addProduct(
+        name: _nameController.text,
+        price: double.parse(_priceController.text),
+        categoryId: _selectedProductCategory!,
+        barcode: _barcodeController.text,
+        imageUrl: _imageUrl,
+      );
 
-        final categoryRef = FirebaseFirestore.instance
-            .collection('categories')
-            .doc(_selectedProductCategory);
-
-        final product = Product(
-          id: FirebaseFirestore.instance.collection('products').doc().id,
-          name: _nameController.text,
-          price: double.parse(_priceController.text),
-          categoryRef: categoryRef, 
-          barcode: _barcodeController.text,
-          imageUrl: _imageUrl,
-        );
-
-        await FirebaseFirestore.instance
-            .collection('products')
-            .doc(product.id)
-            .set(product.toMap());
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Product added successfully')),
-        );
-
-        // Clear form
-        _formKey.currentState!.reset();
-        setState(() {
-          _imageUrl = null;
-          _selectedProductCategory = null;
-        });
-        Navigator.pop(context);
-      } catch (e) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error adding product: $e')),
-        );
-      } finally {
-        setState(() => _isLoading = false);
-      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Product added successfully')),
+      );
+      _resetForm();
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: ${e.toString()}')),
+      );
+    } finally {
+      setState(() => _isLoading = false);
     }
   }
 
   Future<void> _updateProduct(String productId) async {
-    if (_formKey.currentState!.validate()) {
-      setState(() => _isLoading = true);
-      try {
+    if (!_formKey.currentState!.validate()) return;
+    
+    setState(() => _isLoading = true);
+    try {
+      await _firestoreService.updateProduct(
+        productId: productId,
+        name: _nameController.text,
+        price: double.parse(_priceController.text),
+        categoryId: _selectedProductCategory!,
+        barcode: _barcodeController.text,
+        imageUrl: _imageUrl,
+      );
 
-        final categoryRef = FirebaseFirestore.instance
-            .collection('categories')
-            .doc(_selectedProductCategory);
-
-        await FirebaseFirestore.instance
-            .collection('products')
-            .doc(productId)
-            .update({
-              'name': _nameController.text,
-              'price': double.parse(_priceController.text),
-              'categoryRef': categoryRef, // Using DocumentReference
-              'barcode': _barcodeController.text,
-              'imageUrl': _imageUrl,
-            });
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Product updated successfully')),
-        );
-        Navigator.pop(context);
-      } catch (e) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error updating product: $e')),
-        );
-      } finally {
-        setState(() => _isLoading = false);
-      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Product updated successfully')),
+      );
+      Navigator.pop(context);
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: ${e.toString()}')),
+      );
+    } finally {
+      setState(() => _isLoading = false);
     }
+  }
+
+  void _resetForm() {
+    _formKey.currentState?.reset();
+    setState(() {
+      _imageUrl = null;
+      _selectedProductCategory = null;
+      _barcodeController.clear();
+    });
   }
 
   Future<void> _addCategory() async {
@@ -5468,6 +5566,7 @@ import 'package:provider/provider.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:salesgo/models/product.dart';
 import 'package:salesgo/models/sale.dart';
+import 'package:salesgo/services/firestore_service.dart';
 import '../../viewmodels/auth_vm.dart';
 import '../../widgets/sale_item.dart';
 
@@ -5561,6 +5660,108 @@ class _HistoryScreenState extends State<HistoryScreen> {
     }
   }
 
+  Future<void> _processRefund(Sale sale, BuildContext context) async {
+    if (sale.refunded) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('This sale has already been refunded')),
+      );
+      return;
+    }
+
+    final authVM = Provider.of<AuthViewModel>(context, listen: false);
+    final firestoreService = Provider.of<FirestoreService>(context, listen: false);
+    final locationId = authVM.currentUser?.assignedLocationId;
+
+    if (locationId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No location assigned')),
+      );
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Confirm Refund'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Are you sure you want to process this refund?'),
+            const SizedBox(height: 16),
+            Text('Sale ID: ${sale.id.substring(0, 8)}'),
+            Text('Date: ${DateFormat('MMM dd, yyyy').format(sale.date)}'),
+            Text('Total: \$${sale.totalAmount.toStringAsFixed(2)}'),
+            const SizedBox(height: 16),
+            const Text('This will:'),
+            const Text('- Mark the sale as refunded'),
+            const Text('- Restock the items in inventory'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Confirm Refund', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    try {
+      // Show loading indicator
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => const Center(child: CircularProgressIndicator()),
+      );
+
+      // Process refund and update stock
+      await firestoreService.processRefund(
+        products: sale.products,
+        agentId: authVM.currentUser!.uid,
+        locationId: locationId,
+      );
+
+      // Mark sale as refunded
+      await FirebaseFirestore.instance
+          .collection('sales')
+          .doc(sale.id)
+          .update({
+            'refunded': true,
+            'refundDate': FieldValue.serverTimestamp(),
+            'refundBy': authVM.currentUser!.uid,
+          });
+
+      // Close loading indicator
+      Navigator.pop(context);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Refund processed successfully!')),
+      );
+    } catch (e) {
+      // Close loading indicator if still open
+      Navigator.pop(context);
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Refund failed: ${e.toString()}')),
+      );
+    }
+  }
+
+  Widget _buildRefundButton(Sale sale, BuildContext context) {
+    return IconButton(
+      icon: const Icon(Icons.replay_circle_filled_rounded, color: Colors.red),
+      onPressed: () => _processRefund(sale, context),
+      tooltip: 'Process Refund',
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final authVM = Provider.of<AuthViewModel>(context);
@@ -5628,6 +5829,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
             .where('date', isLessThanOrEqualTo: _dateRange.end)
             .orderBy('date', descending: true)
             .snapshots(),
+            
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
@@ -5662,10 +5864,68 @@ class _HistoryScreenState extends State<HistoryScreen> {
   Widget _buildSalesList(List<Sale> sales) {
     return ListView.builder(
       itemCount: sales.length,
-      itemBuilder: (context, index) => SaleItem(sale: sales[index]),
+      itemBuilder: (context, index) {
+        final sale = sales[index];
+        return ListTile(
+          title: Text('Sale #${sale.id}'),
+          subtitle: Text(
+            'Total: €${sale.totalAmount.toStringAsFixed(2)}\n'
+            'Date: ${DateFormat('dd/MM/yyyy HH:mm').format(sale.date)}',
+          ),
+          trailing: !sale.refunded
+              ? IconButton(
+                  icon: const Icon(Icons.replay, color: Colors.red),
+                  onPressed: () => _processRefund(sale, context),
+                )
+              : const Text('Refunded', style: TextStyle(color: Colors.grey)),
+        );
+      },
     );
   }
 
+  void _showRefundConfirmation(BuildContext context, Sale sale) {
+    final theme = Theme.of(context);
+    
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Confirmer le remboursement'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Vente #${sale.id.substring(0, 6)}'),
+            const SizedBox(height: 8),
+            Text(
+              'Montant: ${NumberFormat.currency(symbol: '€', decimalDigits: 2).format(sale.totalAmount)}',
+              style: theme.textTheme.titleMedium,
+            ),
+            const SizedBox(height: 16),
+            const Text('Cette action va:'),
+            const SizedBox(height: 4),
+            const Text('• Marquer la vente comme remboursée'),
+            const Text('• Réajuster le stock des articles'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Annuler'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _processRefund(sale, context);
+            },
+            style: TextButton.styleFrom(
+              foregroundColor: theme.colorScheme.error,
+            ),
+            child: const Text('Confirmer'),
+          ),
+        ],
+      ),
+    );
+  }
   Widget _buildGroupedByProduct(List<Sale> sales) {
     final productGroups = <String, ProductSalesData>{};
     
@@ -7256,20 +7516,236 @@ widgets\sale_item.dart:
 
 # widgets\sale_item.dart
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import '../models/sale.dart';
 
 class SaleItem extends StatelessWidget {
   final Sale sale;
-  
-  const SaleItem({super.key, required this.sale});
+  final Widget? trailing;
+  final VoidCallback? onRefund;
+
+  const SaleItem({
+    super.key, 
+    required this.sale, 
+    this.trailing,
+    this.onRefund,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final dateFormat = DateFormat('dd/MM/yy HH:mm');
+    final currencyFormat = NumberFormat.currency(
+      symbol: '€', 
+      decimalDigits: 2,
+      locale: 'en_EN',
+    );
+
     return Card(
-      child: ListTile(
-        title: Text('Vente #${sale.id}'),
-        subtitle: Text('Total: ${sale.totalAmount}€'),
-        trailing: Text(sale.paymentMethod),
+      margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 10),
+      elevation: 1,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: () => _showSaleDetails(context, sale),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Header Row
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Flexible(
+                    child: Text(
+                      'Vente #${sale.id.substring(0, 6)}',
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  if (sale.refunded) _buildRefundedBadge(),
+                ],
+              ),
+              
+              const SizedBox(height: 10),
+              
+              // Details Row
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        dateFormat.format(sale.date),
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: Colors.grey[600],
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '${sale.products.length} ${sale.products.length == 1 ? 'article' : 'articles'}',
+                        style: theme.textTheme.bodySmall,
+                      ),
+                    ],
+                  ),
+                  
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text(
+                        currencyFormat.format(sale.totalAmount),
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      _buildPaymentMethodChip(sale.paymentMethod),
+                    ],
+                  ),
+                ],
+              ),
+              
+              // Refund Section
+              if (sale.refunded && sale.refundDate != null) 
+                Padding(
+                  padding: const EdgeInsets.only(top: 10),
+                  child: Text(
+                    'Remboursé le ${dateFormat.format(sale.refundDate!)}',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: Colors.red[700],
+                      fontStyle: FontStyle.italic,
+                    ),
+                  ),
+                ),
+              
+              // Action Buttons
+              if (trailing != null && !sale.refunded)
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 10),
+                    child: trailing,
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRefundedBadge() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.red[50],
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.red[100]!),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.assignment_return, color: Colors.red[400], size: 16),
+          const SizedBox(width: 4),
+          Text(
+            'Remboursé',
+            style: TextStyle(
+              color: Colors.red[700],
+              fontSize: 12,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPaymentMethodChip(String method) {
+    return Chip(
+      label: Text(
+        _getPaymentMethodLabel(method),
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 12,
+          fontWeight: FontWeight.w500,
+        ),
+      ),
+      backgroundColor: _getPaymentMethodColor(method),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
+      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      visualDensity: VisualDensity.compact,
+    );
+  }
+
+  String _getPaymentMethodLabel(String method) {
+    switch (method.toLowerCase()) {
+      case 'cash':
+        return 'ESPÈCES';
+      case 'credit card':
+        return 'CARTE';
+      case 'mobile payment':
+        return 'MOBILE';
+      default:
+        return method.toUpperCase();
+    }
+  }
+
+  Color _getPaymentMethodColor(String method) {
+    switch (method.toLowerCase()) {
+      case 'cash':
+        return Colors.green[600]!;
+      case 'credit card':
+        return Colors.blue[600]!;
+      case 'mobile payment':
+        return Colors.purple[600]!;
+      default:
+        return Colors.grey[600]!;
+    }
+  }
+
+  void _showSaleDetails(BuildContext context, Sale sale) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Détails de la vente #${sale.id.substring(0, 6)}'),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('Date: ${DateFormat('dd/MM/yyyy HH:mm').format(sale.date)}'),
+              Text('Total: ${NumberFormat.currency(symbol: '€', decimalDigits: 2).format(sale.totalAmount)}'),
+              Text('Méthode: ${sale.paymentMethod}'),
+              if (sale.refunded) 
+                Text('Remboursé le: ${DateFormat('dd/MM/yyyy HH:mm').format(sale.refundDate!)}'),
+              
+              const SizedBox(height: 16),
+              const Text('Articles:', style: TextStyle(fontWeight: FontWeight.bold)),
+              ...sale.products.map((product) => 
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: product.imageUrl != null 
+                    ? Image.network(product.imageUrl!, width: 40, height: 40)
+                    : const Icon(Icons.shopping_bag),
+                  title: Text(product.name),
+                  subtitle: Text('${product.price}€'),
+                )
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Fermer'),
+          ),
+        ],
       ),
     );
   }

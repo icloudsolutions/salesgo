@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:salesgo/models/product.dart';
 import 'package:salesgo/models/sale.dart';
+import 'package:salesgo/services/firestore_service.dart';
 import '../../viewmodels/auth_vm.dart';
 import '../../widgets/sale_item.dart';
 
@@ -97,6 +98,108 @@ class _HistoryScreenState extends State<HistoryScreen> {
     }
   }
 
+  Future<void> _processRefund(Sale sale, BuildContext context) async {
+    if (sale.refunded) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('This sale has already been refunded')),
+      );
+      return;
+    }
+
+    final authVM = Provider.of<AuthViewModel>(context, listen: false);
+    final firestoreService = Provider.of<FirestoreService>(context, listen: false);
+    final locationId = authVM.currentUser?.assignedLocationId;
+
+    if (locationId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No location assigned')),
+      );
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Confirm Refund'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Are you sure you want to process this refund?'),
+            const SizedBox(height: 16),
+            Text('Sale ID: ${sale.id.substring(0, 8)}'),
+            Text('Date: ${DateFormat('MMM dd, yyyy').format(sale.date)}'),
+            Text('Total: \$${sale.totalAmount.toStringAsFixed(2)}'),
+            const SizedBox(height: 16),
+            const Text('This will:'),
+            const Text('- Mark the sale as refunded'),
+            const Text('- Restock the items in inventory'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Confirm Refund', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    try {
+      // Show loading indicator
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => const Center(child: CircularProgressIndicator()),
+      );
+
+      // Process refund and update stock
+      await firestoreService.processRefund(
+        products: sale.products,
+        agentId: authVM.currentUser!.uid,
+        locationId: locationId,
+      );
+
+      // Mark sale as refunded
+      await FirebaseFirestore.instance
+          .collection('sales')
+          .doc(sale.id)
+          .update({
+            'refunded': true,
+            'refundDate': FieldValue.serverTimestamp(),
+            'refundBy': authVM.currentUser!.uid,
+          });
+
+      // Close loading indicator
+      Navigator.pop(context);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Refund processed successfully!')),
+      );
+    } catch (e) {
+      // Close loading indicator if still open
+      Navigator.pop(context);
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Refund failed: ${e.toString()}')),
+      );
+    }
+  }
+
+  Widget _buildRefundButton(Sale sale, BuildContext context) {
+    return IconButton(
+      icon: const Icon(Icons.replay_circle_filled_rounded, color: Colors.red),
+      onPressed: () => _processRefund(sale, context),
+      tooltip: 'Process Refund',
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final authVM = Provider.of<AuthViewModel>(context);
@@ -164,6 +267,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
             .where('date', isLessThanOrEqualTo: _dateRange.end)
             .orderBy('date', descending: true)
             .snapshots(),
+            
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
@@ -198,10 +302,68 @@ class _HistoryScreenState extends State<HistoryScreen> {
   Widget _buildSalesList(List<Sale> sales) {
     return ListView.builder(
       itemCount: sales.length,
-      itemBuilder: (context, index) => SaleItem(sale: sales[index]),
+      itemBuilder: (context, index) {
+        final sale = sales[index];
+        return ListTile(
+          title: Text('Sale #${sale.id}'),
+          subtitle: Text(
+            'Total: €${sale.totalAmount.toStringAsFixed(2)}\n'
+            'Date: ${DateFormat('dd/MM/yyyy HH:mm').format(sale.date)}',
+          ),
+          trailing: !sale.refunded
+              ? IconButton(
+                  icon: const Icon(Icons.replay, color: Colors.red),
+                  onPressed: () => _processRefund(sale, context),
+                )
+              : const Text('Refunded', style: TextStyle(color: Colors.grey)),
+        );
+      },
     );
   }
 
+  void _showRefundConfirmation(BuildContext context, Sale sale) {
+    final theme = Theme.of(context);
+    
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Confirmer le remboursement'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Vente #${sale.id.substring(0, 6)}'),
+            const SizedBox(height: 8),
+            Text(
+              'Montant: ${NumberFormat.currency(symbol: '€', decimalDigits: 2).format(sale.totalAmount)}',
+              style: theme.textTheme.titleMedium,
+            ),
+            const SizedBox(height: 16),
+            const Text('Cette action va:'),
+            const SizedBox(height: 4),
+            const Text('• Marquer la vente comme remboursée'),
+            const Text('• Réajuster le stock des articles'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Annuler'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _processRefund(sale, context);
+            },
+            style: TextButton.styleFrom(
+              foregroundColor: theme.colorScheme.error,
+            ),
+            child: const Text('Confirmer'),
+          ),
+        ],
+      ),
+    );
+  }
   Widget _buildGroupedByProduct(List<Sale> sales) {
     final productGroups = <String, ProductSalesData>{};
     

@@ -196,41 +196,55 @@ class FirestoreService {
     }
   }
 
+  // Add this to your FirestoreService class
   Future<void> processRefund({
     required List<Product> products,
     required String agentId,
     required String locationId,
   }) async {
-    try {
-      final batch = FirebaseFirestore.instance.batch();
-      final refundDoc = FirebaseFirestore.instance.collection('refunds').doc();
-      
-      // Create refund record
-      batch.set(refundDoc, {
-        'products': products.map((p) => p.toMap()).toList(),
-        'totalAmount': products.fold(0.0, (sum, p) => sum + p.price),
-        'agentId': agentId,
-        'locationId': locationId,
-        'date': FieldValue.serverTimestamp(),
-        'status': 'completed',
+    final batch = FirebaseFirestore.instance.batch();
+
+    // Grouper les produits pour ajuster les quantités
+    final productQuantities = <String, int>{};
+    for (final product in products) {
+      productQuantities.update(product.id, (value) => value + 1, ifAbsent: () => 1);
+    }
+
+    for (final entry in productQuantities.entries) {
+      final productId = entry.key;
+      final quantity = entry.value;
+
+      // Mise à jour du stock produit
+      final productRef = FirebaseFirestore.instance
+          .collection('locations')
+          .doc(locationId)
+          .collection('products')
+          .doc(productId);
+
+      batch.update(productRef, {
+        'stock': FieldValue.increment(quantity),
+        'lastUpdated': FieldValue.serverTimestamp(),
       });
 
-      // Update inventory for each product
-      for (final product in products) {
-        final productRef = FirebaseFirestore.instance
-            .collection('products')
-            .doc(product.id);
-        
-        batch.update(productRef, {
-          'stock': FieldValue.increment(1),
-        });
-      }
+      // Enregistrement dans stockHistory (top-level)
+      final logRef = FirebaseFirestore.instance
+          .collection('stockHistory')
+          .doc();
 
-      await batch.commit();
-    } catch (e) {
-      throw Exception('Failed to process refund: $e');
+      batch.set(logRef, {
+        'productId': productId,
+        'quantity': quantity,
+        'type': 'refund',
+        'agentId': agentId,
+        'locationId': locationId,
+        'timestamp': FieldValue.serverTimestamp(),
+        'notes': 'Refund processed',
+      });
     }
+
+    await batch.commit();
   }
+
 
   // Categories
   Future<void> addCategory(Map<String, dynamic> categoryData) async {
