@@ -153,6 +153,87 @@ class FirestoreService {
       });
   }
 
+  /// Updates stock for a product in a location and creates a history entry
+  Future<void> updateStock({
+    required String locationId,
+    required String productId,
+    required int quantity,
+    required String type, // 'assign' or 'refund'
+    required String adminId,
+    required String adminName,
+  }) async {
+    final batch = FirebaseFirestore.instance.batch();
+    
+    // Reference to the product's stock document in the location
+    final stockRef = _firestore
+        .collection('locations')
+        .doc(locationId)
+        .collection('stock')
+        .doc(productId);
+    
+    // Reference to a new document in the stockHistory collection
+    final historyRef = _firestore.collection('stockHistory').doc();
+
+    if (type == 'refund') {
+      // For refunds, we need to check if there's enough stock to refund
+      final DocumentSnapshot stockSnapshot = await stockRef.get();
+      
+      if (stockSnapshot.exists) {
+        final currentStock = stockSnapshot.get('stock') as int? ?? 0;
+        // Ensure we don't refund more than we have in stock
+        if (quantity > currentStock) {
+          throw 'Cannot refund $quantity units. Only $currentStock units available in stock.';
+        }
+      } else {
+        // If the product doesn't exist in stock, we can't refund it
+        throw 'Cannot refund $quantity units. Product not found in location stock.';
+      }
+    }
+
+    // Update the stock quantity based on type
+    batch.update(stockRef, {
+      'stock': FieldValue.increment(type == 'assign' ? quantity : -quantity),
+      'lastUpdated': FieldValue.serverTimestamp(),
+    });
+
+    // Create a history record
+    batch.set(historyRef, {
+      'locationId': locationId,
+      'productId': productId,
+      'quantity': quantity,
+      'type': type,
+      'adminId': adminId,
+      'adminName': adminName,
+      'timestamp': FieldValue.serverTimestamp(),
+      'notes': type == 'assign' 
+        ? '$quantity units assigned to location' 
+        : '$quantity units refunded from location',
+    });
+
+    // Execute the batch operation
+    await batch.commit();
+  }
+
+  Future<int> getTotalRefundedProducts(String locationId) async {
+    try {
+      final snapshot = await FirebaseFirestore.instance
+          .collection('stockHistory')
+          .where('locationId', isEqualTo: locationId)
+          .where('type', isEqualTo: 'refund')
+          .get();
+
+      int total = 0;
+      for (var doc in snapshot.docs) {
+        total += doc.data()['quantity'] as int? ?? 0;
+      }
+
+      return total;
+    } catch (e) {
+      print('Error fetching refund count: $e');
+      return 0;
+    }
+  }
+
   Future<QuerySnapshot<Map<String, dynamic>>> getActiveDiscounts(DateTime now) async {
     return await _firestore.collection('discounts')
         .where('startDate', isLessThanOrEqualTo: now)

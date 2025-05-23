@@ -34,7 +34,9 @@ class _StockScreenState extends State<StockScreen> with SingleTickerProviderStat
     final stockVM = Provider.of<StockViewModel>(context, listen: false);
     
     if (authVM.currentUser?.assignedLocationId != null) {
-      stockVM.loadStock(authVM.currentUser!.assignedLocationId!);
+      String locationId = authVM.currentUser!.assignedLocationId!;
+      stockVM.loadStock(locationId);
+      stockVM.loadRefundedProducts(locationId); 
     }
   }
 
@@ -188,7 +190,9 @@ class _StockScreenState extends State<StockScreen> with SingleTickerProviderStat
                       Text('Available: $quantity'),
                       Text('Initial stock: ${stockVM.stock[productId] ?? 0}'),
                       Text('Sold this month: ${stockVM.monthlySales[productId] ?? 0}'),
-                      if (product.barcode.isNotEmpty)
+                      if (stockVM.refundedProducts[productId] != null) 
+                        Text('Refunded: ${stockVM.refundedProducts[productId]}'),// ← New Line
+                      if (product.barcode.isNotEmpty)                      
                         Text('Barcode: ${product.barcode}'),
                     ],
                   ),
@@ -277,92 +281,87 @@ class _StockScreenState extends State<StockScreen> with SingleTickerProviderStat
             final data = doc.data() as Map<String, dynamic>;
             final timestamp = (data['timestamp'] as Timestamp).toDate();
 
-            return FutureBuilder(
-              future: Future.wait([
-                FirebaseFirestore.instance
-                    .collection('products')
-                    .doc(data['productId'])
-                    .get(),
-                FirebaseFirestore.instance
-                    .collection('users')
-                    .doc(data['adminId'])
-                    .get(),
-              ]),
-              builder: (context, AsyncSnapshot<List<DocumentSnapshot>> snap) {
-                if (snap.connectionState == ConnectionState.waiting) {
+            // Extract operation type and quantity
+            final int quantity = data['quantity'] as int? ?? 0;
+            final String type = data['type'] as String? ?? 'unknown';
+            final String productId = data['productId'] as String? ?? '';
+
+            // Define operation labels and icons
+            final Map<String, IconData> typeIcons = {
+              'assign': Icons.add_box,
+              'refund': Icons.assignment_return,
+              'sale': Icons.shopping_cart,
+              'manual': Icons.edit,
+            };
+
+            final Map<String, Color> typeColors = {
+              'assign': Colors.green,
+              'refund': Colors.red,
+              'sale': Colors.orange,
+              'manual': Colors.blue,
+            };
+
+            final String displayType = {
+              'assign': 'Assigned',
+              'refund': 'Refunded',
+              'sale': 'Sold',
+              'manual': 'Manually Adjusted'
+            }[type] ??
+                type;
+
+            final String qtyDisplay = (quantity > 0 ? '+' : '') + '$quantity';
+
+            return FutureBuilder<DocumentSnapshot>(
+              future: FirebaseFirestore.instance
+                  .collection('products')
+                  .doc(productId)
+                  .get(),
+              builder: (context, productSnapshot) {
+                if (productSnapshot.connectionState == ConnectionState.waiting) {
                   return const ListTile(
                     leading: CircularProgressIndicator(),
-                    title: Text('Loading history details...'),
+                    title: Text('Loading product...'),
                   );
                 }
 
-                final product = snap.data?[0].exists ?? false
-                    ? Product.fromFirestore(snap.data![0])
-                    : null;
-                final admin = snap.data?[1].exists ?? false
-                    ? snap.data![1].data() as Map<String, dynamic>
-                    : null;
+                Product? product;
+                if (productSnapshot.hasData && productSnapshot.data!.exists) {
+                  product = Product.fromFirestore(productSnapshot.data!);
+                }
 
                 return Card(
                   margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  elevation: 2,
                   child: ListTile(
-                    leading: FutureBuilder<DocumentSnapshot>(
-                      future: FirebaseFirestore.instance
-                          .collection('products')
-                          .doc(data['productId'])
-                          .get(),
-                      builder: (context, productSnapshot) {
-                        if (productSnapshot.connectionState == ConnectionState.waiting) {
-                          return const SizedBox(
-                            width: 50,
-                            height: 50,
-                            child: CircularProgressIndicator(),
-                          );
-                        }
-                        
-                        if (!productSnapshot.hasData || !productSnapshot.data!.exists) {
-                          return const Icon(Icons.error, color: Colors.red);
-                        }
-
-                        final product = Product.fromFirestore(productSnapshot.data!);
-                        return product.imageUrl != null
-                            ? Image.network(product.imageUrl!, width: 50, height: 50)
-                            : const Icon(Icons.shopping_bag);
-                      },
+                    leading: CircleAvatar(
+                      backgroundColor: typeColors[type] ?? Colors.grey,
+                      child: Icon(
+                        typeIcons[type] ?? Icons.info_outline,
+                        color: Colors.white,
+                      ),
                     ),
-                    title: FutureBuilder<DocumentSnapshot>(
-                      future: FirebaseFirestore.instance
-                          .collection('products')
-                          .doc(data['productId'])
-                          .get(),
-                      builder: (context, productSnapshot) {
-                        if (productSnapshot.connectionState == ConnectionState.waiting) {
-                          return const Text('Loading product...');
-                        }
-                        
-                        if (!productSnapshot.hasData || !productSnapshot.data!.exists) {
-                          return Text('Product ID: ${data['productId']}');
-                        }
-
-                        final product = Product.fromFirestore(productSnapshot.data!);
-                        return Text(product.name);
-                      },
+                    title: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(displayType),
+                        Text(
+                          qtyDisplay,
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: quantity > 0 ? Colors.green : Colors.red,
+                          ),
+                        ),
+                      ],
                     ),
                     subtitle: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('Quantity: ${data['quantity']}'),
-                        if (admin != null)
-                          Text('Updated by: ${admin['email']}'),
+                        if (product != null) Text('Product: ${product.name}'),
                         Text(
                           DateFormat('MMM dd, yyyy - HH:mm').format(timestamp),
                           style: Theme.of(context).textTheme.bodySmall,
                         ),
                       ],
-                    ),
-                    trailing: Icon(
-                      (data['quantity'] as int) > 0 ? Icons.add : Icons.remove,
-                      color: (data['quantity'] as int) > 0 ? Colors.green : Colors.red,
                     ),
                   ),
                 );

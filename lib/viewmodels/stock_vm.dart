@@ -83,4 +83,35 @@ class StockViewModel with ChangeNotifier {
     _salesSubscription?.cancel();
     super.dispose();
   }
+
+  final Map<String, int> _refundedProducts = {};
+
+  Map<String, int> get refundedProducts => _refundedProducts;
+
+  Future<void> loadRefundedProducts(String locationId) async {
+    try {
+      final snapshot = await FirebaseFirestore.instance
+          .collection('stockHistory')
+          .where('locationId', isEqualTo: locationId)
+          .where('type', isEqualTo: 'refund')
+          .get();
+
+      final Map<String, int> refundMap = {};
+      for (var doc in snapshot.docs) {
+        final productId = doc.data()['productId'] as String?;
+        final quantity = doc.data()['quantity'] as int? ?? 0;
+        if (productId != null) {
+          refundMap.update(productId, (value) => value + quantity, ifAbsent: () => quantity);
+        }
+      }
+
+      _refundedProducts.clear();
+      _refundedProducts.addAll(refundMap);
+      notifyListeners();
+    } catch (e) {
+      print('Error loading refunded products: $e');
+    }
+  }
+
+
 }

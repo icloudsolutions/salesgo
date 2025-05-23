@@ -466,6 +466,7 @@ class _StockManagementState extends State<StockManagement> {
           'productName': _selectedProduct!['name'], // Added product name for better tracking
           'previousQuantity': FieldValue.increment(0), // Placeholder if you want to track changes
           'quantity': quantity,
+          'type': 'assign', // ← This is the missing key!
           'timestamp': FieldValue.serverTimestamp(),
           'adminId': authVM.currentUser?.uid,
           'adminName': authVM.currentUser?.name ?? 'Admin',
