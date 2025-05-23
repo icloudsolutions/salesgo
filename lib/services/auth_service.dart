@@ -51,7 +51,7 @@ class FirebaseAuthService implements AuthService {
       );
       
       // Create user document in Firestore
-      await _createUserDocument(userCredential.user!);
+      await _createUserDocument(userCredential.user!, name, role);
       
       return userCredential.user;
     } on FirebaseAuthException catch (e) {
@@ -59,17 +59,16 @@ class FirebaseAuthService implements AuthService {
     }
   }
 
-  Future<void> _createUserDocument(User user) async {
-    await FirebaseFirestore.instance
-        .collection('users')
-        .doc(user.uid)
-        .set({
-          'uid': user.uid,
-          'email': user.email,
-          'role': 'agent', // Default role
-          'createdAt': FieldValue.serverTimestamp(),
-        });
+  Future<void> _createUserDocument(User user, String name, String role) async {
+    await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
+      'uid': user.uid,
+      'email': user.email,
+      'role': role,
+      'name': name,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
   }
+
 
   @override
   Future<void> signOut() => _auth.signOut();

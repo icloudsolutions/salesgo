@@ -7,7 +7,9 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:intl/intl.dart';
 import 'package:salesgo/models/product.dart';
 import 'package:salesgo/models/discount.dart';
-import 'package:salesgo/models/category.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:salesgo/services/firestore_service.dart';
 
 class ProductManagement extends StatefulWidget {
   const ProductManagement({super.key});
@@ -38,6 +40,10 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
   DateTime? _discountStartDate;
   DateTime? _discountEndDate;
 
+  final FirestoreService _firestoreService = FirestoreService();
+
+
+
   @override
   void initState() {
     super.initState();
@@ -54,7 +60,87 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
     _discountNameController.dispose();
     _discountValueController.dispose();
     _discountTypeController.dispose();
+    _scannerController.dispose();
+
     super.dispose();
+  }
+
+  // Add to your state class
+  final MobileScannerController _scannerController = MobileScannerController();
+
+  Future<void> _scanBarcode() async {
+    try {
+      final status = await Permission.camera.request();
+      if (!status.isGranted) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Camera permission is required')),
+        );
+        return;
+      }
+
+      if (!mounted) return;
+      final barcode = await showDialog<String>(
+        context: context,
+        builder: (context) => Dialog(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: MediaQuery.of(context).size.width * 0.8,
+              maxHeight: MediaQuery.of(context).size.height * 0.6,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Text('Scan Barcode', style: Theme.of(context).textTheme.titleLarge),
+                ),
+                Expanded(
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: MobileScanner(
+                      controller: _scannerController,
+                      onDetect: (capture) {
+                        final barcodes = capture.barcodes;
+                        if (barcodes.isNotEmpty) {
+                          Navigator.pop(context, barcodes.first.rawValue);
+                        }
+                      },
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Text('Point the camera at a barcode',
+                    style: TextStyle(color: Colors.grey[600])),
+                ),
+                TextButton(
+                  onPressed: () {
+                    _scannerController.stop();
+                    Navigator.pop(context);
+                  },
+                  child: const Text('Cancel'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+
+      if (barcode != null && barcode.isNotEmpty && mounted) {
+        setState(() {
+          _barcodeController.text = barcode;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error scanning barcode: ${e.toString()}')),
+        );
+      }
+    } finally {
+      _scannerController.stop();
+    }
   }
 
   Future<void> _pickImage() async {
@@ -81,81 +167,65 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
   }
 
   Future<void> _addProduct() async {
-    if (_formKey.currentState!.validate()) {
-      setState(() => _isLoading = true);
-      try {
+    if (!_formKey.currentState!.validate()) return;
+    
+    setState(() => _isLoading = true);
+    try {
+      await _firestoreService.addProduct(
+        name: _nameController.text,
+        price: double.parse(_priceController.text),
+        categoryId: _selectedProductCategory!,
+        barcode: _barcodeController.text,
+        imageUrl: _imageUrl,
+      );
 
-        final categoryRef = FirebaseFirestore.instance
-            .collection('categories')
-            .doc(_selectedProductCategory);
-
-        final product = Product(
-          id: FirebaseFirestore.instance.collection('products').doc().id,
-          name: _nameController.text,
-          price: double.parse(_priceController.text),
-          categoryRef: categoryRef, 
-          barcode: _barcodeController.text,
-          imageUrl: _imageUrl,
-        );
-
-        await FirebaseFirestore.instance
-            .collection('products')
-            .doc(product.id)
-            .set(product.toMap());
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Product added successfully')),
-        );
-
-        // Clear form
-        _formKey.currentState!.reset();
-        setState(() {
-          _imageUrl = null;
-          _selectedProductCategory = null;
-        });
-        Navigator.pop(context);
-      } catch (e) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error adding product: $e')),
-        );
-      } finally {
-        setState(() => _isLoading = false);
-      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Product added successfully')),
+      );
+      _resetForm();
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: ${e.toString()}')),
+      );
+    } finally {
+      setState(() => _isLoading = false);
     }
   }
 
   Future<void> _updateProduct(String productId) async {
-    if (_formKey.currentState!.validate()) {
-      setState(() => _isLoading = true);
-      try {
+    if (!_formKey.currentState!.validate()) return;
+    
+    setState(() => _isLoading = true);
+    try {
+      await _firestoreService.updateProduct(
+        productId: productId,
+        name: _nameController.text,
+        price: double.parse(_priceController.text),
+        categoryId: _selectedProductCategory!,
+        barcode: _barcodeController.text,
+        imageUrl: _imageUrl,
+      );
 
-        final categoryRef = FirebaseFirestore.instance
-            .collection('categories')
-            .doc(_selectedProductCategory);
-
-        await FirebaseFirestore.instance
-            .collection('products')
-            .doc(productId)
-            .update({
-              'name': _nameController.text,
-              'price': double.parse(_priceController.text),
-              'categoryRef': categoryRef, // Using DocumentReference
-              'barcode': _barcodeController.text,
-              'imageUrl': _imageUrl,
-            });
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Product updated successfully')),
-        );
-        Navigator.pop(context);
-      } catch (e) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error updating product: $e')),
-        );
-      } finally {
-        setState(() => _isLoading = false);
-      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Product updated successfully')),
+      );
+      Navigator.pop(context);
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: ${e.toString()}')),
+      );
+    } finally {
+      setState(() => _isLoading = false);
     }
+  }
+
+  void _resetForm() {
+    _formKey.currentState?.reset();
+    setState(() {
+      _imageUrl = null;
+      _selectedProductCategory = null;
+      _barcodeController.clear();
+    });
   }
 
   Future<void> _addCategory() async {
@@ -585,6 +655,48 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
     );
   }
 
+  Widget _buildProductListTile(Product product, String docId) {
+    return FutureBuilder<DocumentSnapshot>(
+      future: product.categoryRef.get(),
+      builder: (context, categorySnapshot) {
+        if (!categorySnapshot.hasData) {
+          return ListTile(
+            leading: product.imageUrl != null 
+                ? Image.network(product.imageUrl!, width: 50, height: 50)
+                : const Icon(Icons.shopping_bag),
+            title: Text(product.name),
+            subtitle: Text('€${product.price} - Loading category...'),
+          );
+        }
+
+        final categoryDoc = categorySnapshot.data!;
+        final categoryName = categoryDoc.exists ? categoryDoc['name'] ?? 'Unknown' : 'Unknown';
+
+        return ListTile(
+          leading: product.imageUrl != null 
+              ? Image.network(product.imageUrl!, width: 50, height: 50)
+              : const Icon(Icons.shopping_bag),
+          title: Text(product.name),
+          subtitle: Text('€${product.price} - $categoryName'),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                icon: const Icon(Icons.edit),
+                onPressed: () => _editProduct(product),
+              ),
+              IconButton(
+                icon: const Icon(Icons.delete),
+                onPressed: () => _deleteProduct(docId),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+
   Widget _buildProductsTab() {
     return Padding(
       padding: const EdgeInsets.all(16.0),
@@ -599,44 +711,7 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
             itemBuilder: (context, index) {
               final doc = snapshot.data!.docs[index];
               final product = Product.fromFirestore(doc);
-              
-              return FutureBuilder<DocumentSnapshot>(
-                future: product.categoryRef.get(),
-                builder: (context, categorySnapshot) {
-                  if (!categorySnapshot.hasData) {
-                    return ListTile(
-                      leading: product.imageUrl != null 
-                          ? Image.network(product.imageUrl!, width: 50, height: 50)
-                          : const Icon(Icons.shopping_bag),
-                      title: Text(product.name),
-                      subtitle: Text('€${product.price} - Loading category...'),
-                    );
-                  }
-                  
-                  final categoryName = categorySnapshot.data!['name'] ?? 'Unknown';
-                  
-                  return ListTile(
-                    leading: product.imageUrl != null 
-                        ? Image.network(product.imageUrl!, width: 50, height: 50)
-                        : const Icon(Icons.shopping_bag),
-                    title: Text(product.name),
-                    subtitle: Text('€${product.price} - $categoryName'),
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        IconButton(
-                          icon: const Icon(Icons.edit),
-                          onPressed: () => _editProduct(product),
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.delete),
-                          onPressed: () => _deleteProduct(doc.id),
-                        ),
-                      ],
-                    ),
-                  );
-                },
-              );
+              return _buildProductListTile(product, doc.id);
             },
           );
         },
@@ -710,10 +785,10 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
               return FutureBuilder<DocumentSnapshot>(
                 future: discount.categoryRef.get(),
                 builder: (context, categorySnapshot) {
-                  final categoryName = categorySnapshot.hasData
-                      ? categorySnapshot.data!.get('name') ?? 'Unknown Category'
-                      : 'Loading...';
-
+                  final categoryDoc = categorySnapshot.data;
+                  final categoryName = categoryDoc != null && categoryDoc.exists
+                      ? categoryDoc.get('name') ?? 'Unknown Category'
+                      : 'Unknown Category';
                   return Card(
                     margin: const EdgeInsets.symmetric(vertical: 8),
                     child: ListTile(
@@ -804,15 +879,19 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
                 builder: (context, snapshot) {
                   if (!snapshot.hasData) return const SizedBox();
                   
-                  final categories = snapshot.data!.docs.map((doc) {
+                  final categoryDocs = snapshot.data!.docs;
+
+                  final categories = categoryDocs.map((doc) {
                     return DropdownMenuItem<String>(
                       value: doc.id,
                       child: Text(doc['name']),
                     );
                   }).toList();
-                  
+
+                  final isValidValue = categoryDocs.any((doc) => doc.id == _selectedProductCategory);
+
                   return DropdownButtonFormField<String>(
-                    value: _selectedProductCategory,
+                    value: isValidValue ? _selectedProductCategory : null,
                     decoration: const InputDecoration(labelText: 'Category'),
                     items: categories,
                     onChanged: (value) {
@@ -826,7 +905,13 @@ class _ProductManagementState extends State<ProductManagement> with SingleTicker
               ),
               TextFormField(
                 controller: _barcodeController,
-                decoration: const InputDecoration(labelText: 'Barcode'),
+                decoration: InputDecoration(
+                  labelText: 'Barcode',
+                  suffixIcon: IconButton(
+                    icon: const Icon(Icons.qr_code_scanner),
+                    onPressed: _scanBarcode,
+                  ),
+                ),
                 validator: (value) => value!.isEmpty ? 'Required' : null,
               ),
               const SizedBox(height: 20),
@@ -919,25 +1004,27 @@ Widget _buildDiscountForm({bool isEditing = false, String? discountId}) {
                 builder: (context, snapshot) {
                   if (!snapshot.hasData) return const SizedBox();
                   
-                  final categories = snapshot.data!.docs.map((doc) {
+                  final categoryItems = snapshot.data!.docs.map((doc) {
                     return DropdownMenuItem<String>(
-                      value: doc.id,  // Use document ID instead of name
+                      value: doc.id,
                       child: Text(doc['name']),
                     );
                   }).toList();
-                  
+
+                  final isValidValue = snapshot.data!.docs.any((doc) => doc.id == _selectedDiscountCategory);
+
                   return DropdownButtonFormField<String>(
-                    value: _selectedDiscountCategory,
+                    value: isValidValue ? _selectedDiscountCategory : null,
                     decoration: const InputDecoration(labelText: 'Category'),
-                    items: categories,
+                    items: categoryItems,
                     onChanged: (value) {
                       setDialogState(() {
                         _selectedDiscountCategory = value;
                       });
                     },
                     validator: (value) => value == null ? 'Please select a category' : null,
-                    );
-                  },
+                  );
+                },
                 ),
                 const SizedBox(height: 10),
                 SwitchListTile(

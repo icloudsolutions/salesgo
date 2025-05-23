@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:salesgo/models/product.dart';
 import 'package:salesgo/models/sale.dart';
+import 'package:salesgo/services/firestore_service.dart';
 import '../../viewmodels/auth_vm.dart';
 import '../../widgets/sale_item.dart';
 
@@ -97,6 +98,108 @@ class _HistoryScreenState extends State<HistoryScreen> {
     }
   }
 
+  Future<void> _processRefund(Sale sale, BuildContext context) async {
+    if (sale.refunded) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('This sale has already been refunded')),
+      );
+      return;
+    }
+
+    final authVM = Provider.of<AuthViewModel>(context, listen: false);
+    final firestoreService = Provider.of<FirestoreService>(context, listen: false);
+    final locationId = authVM.currentUser?.assignedLocationId;
+
+    if (locationId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No location assigned')),
+      );
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Confirm Refund'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Are you sure you want to process this refund?'),
+            const SizedBox(height: 16),
+            Text('Sale ID: ${sale.id.substring(0, 8)}'),
+            Text('Date: ${DateFormat('MMM dd, yyyy').format(sale.date)}'),
+            Text('Total: \$${sale.totalAmount.toStringAsFixed(2)}'),
+            const SizedBox(height: 16),
+            const Text('This will:'),
+            const Text('- Mark the sale as refunded'),
+            const Text('- Restock the items in inventory'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Confirm Refund', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    try {
+      // Show loading indicator
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => const Center(child: CircularProgressIndicator()),
+      );
+
+      // Process refund and update stock
+      await firestoreService.processRefund(
+        products: sale.products,
+        agentId: authVM.currentUser!.uid,
+        locationId: locationId,
+      );
+
+      // Mark sale as refunded
+      await FirebaseFirestore.instance
+          .collection('sales')
+          .doc(sale.id)
+          .update({
+            'refunded': true,
+            'refundDate': FieldValue.serverTimestamp(),
+            'refundBy': authVM.currentUser!.uid,
+          });
+
+      // Close loading indicator
+      Navigator.pop(context);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Refund processed successfully!')),
+      );
+    } catch (e) {
+      // Close loading indicator if still open
+      Navigator.pop(context);
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Refund failed: ${e.toString()}')),
+      );
+    }
+  }
+
+  Widget _buildRefundButton(Sale sale, BuildContext context) {
+    return IconButton(
+      icon: const Icon(Icons.replay_circle_filled_rounded, color: Colors.red),
+      onPressed: () => _processRefund(sale, context),
+      tooltip: 'Process Refund',
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final authVM = Provider.of<AuthViewModel>(context);
@@ -164,6 +267,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
             .where('date', isLessThanOrEqualTo: _dateRange.end)
             .orderBy('date', descending: true)
             .snapshots(),
+            
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
@@ -198,10 +302,68 @@ class _HistoryScreenState extends State<HistoryScreen> {
   Widget _buildSalesList(List<Sale> sales) {
     return ListView.builder(
       itemCount: sales.length,
-      itemBuilder: (context, index) => SaleItem(sale: sales[index]),
+      itemBuilder: (context, index) {
+        final sale = sales[index];
+        return ListTile(
+          title: Text('Sale #${sale.id}'),
+          subtitle: Text(
+            'Total: €${sale.totalAmount.toStringAsFixed(2)}\n'
+            'Date: ${DateFormat('dd/MM/yyyy HH:mm').format(sale.date)}',
+          ),
+          trailing: !sale.refunded
+              ? IconButton(
+                  icon: const Icon(Icons.replay, color: Colors.red),
+                  onPressed: () => _processRefund(sale, context),
+                )
+              : const Text('Refunded', style: TextStyle(color: Colors.grey)),
+        );
+      },
     );
   }
 
+  void _showRefundConfirmation(BuildContext context, Sale sale) {
+    final theme = Theme.of(context);
+    
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Confirmer le remboursement'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Vente #${sale.id.substring(0, 6)}'),
+            const SizedBox(height: 8),
+            Text(
+              'Montant: ${NumberFormat.currency(symbol: '€', decimalDigits: 2).format(sale.totalAmount)}',
+              style: theme.textTheme.titleMedium,
+            ),
+            const SizedBox(height: 16),
+            const Text('Cette action va:'),
+            const SizedBox(height: 4),
+            const Text('• Marquer la vente comme remboursée'),
+            const Text('• Réajuster le stock des articles'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Annuler'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _processRefund(sale, context);
+            },
+            style: TextButton.styleFrom(
+              foregroundColor: theme.colorScheme.error,
+            ),
+            child: const Text('Confirmer'),
+          ),
+        ],
+      ),
+    );
+  }
   Widget _buildGroupedByProduct(List<Sale> sales) {
     final productGroups = <String, ProductSalesData>{};
     
@@ -285,163 +447,163 @@ class _HistoryScreenState extends State<HistoryScreen> {
     );
   }
 
-Widget _buildGroupedByCategory(List<Sale> sales) {
-  final categoryGroups = <String, CategorySalesData>{};
-  
-  // Group sales by category
-  for (final sale in sales) {
-    final categoryQuantities = <String, int>{};
-    final categoryAmounts = <String, double>{};
-    final productsByCategory = <String, Product>{};
+  Widget _buildGroupedByCategory(List<Sale> sales) {
+    final categoryGroups = <String, CategorySalesData>{};
+    
+    // Group sales by category
+    for (final sale in sales) {
+      final categoryQuantities = <String, int>{};
+      final categoryAmounts = <String, double>{};
+      final productsByCategory = <String, Product>{};
 
-    for (final product in sale.products) {
-      final categoryId = product.categoryRef.id;
+      for (final product in sale.products) {
+        final categoryId = product.categoryRef.id;
 
-      categoryQuantities.update(categoryId, (value) => value + 1, ifAbsent: () => 1);
-      categoryAmounts.update(categoryId, (value) => value + product.price, ifAbsent: () => product.price);
-      
-      // Sauvegarder un produit par catégorie pour le prix (on peut en prendre un arbitraire)
-      productsByCategory[categoryId] = product;
+        categoryQuantities.update(categoryId, (value) => value + 1, ifAbsent: () => 1);
+        categoryAmounts.update(categoryId, (value) => value + product.price, ifAbsent: () => product.price);
+        
+        // Sauvegarder un produit par catégorie pour le prix (on peut en prendre un arbitraire)
+        productsByCategory[categoryId] = product;
+      }
+
+      for (final categoryId in categoryQuantities.keys) {
+        categoryGroups.putIfAbsent(categoryId, () => CategorySalesData(
+          categoryId: categoryId,
+          sales: [],
+        ));
+
+        categoryGroups[categoryId]!.sales.add(sale);
+        categoryGroups[categoryId]!.totalQuantity += categoryQuantities[categoryId]!;
+        categoryGroups[categoryId]!.totalAmount += categoryAmounts[categoryId]!;
+      }
     }
 
-    for (final categoryId in categoryQuantities.keys) {
-      categoryGroups.putIfAbsent(categoryId, () => CategorySalesData(
-        categoryId: categoryId,
-        sales: [],
-      ));
 
-      categoryGroups[categoryId]!.sales.add(sale);
-      categoryGroups[categoryId]!.totalQuantity += categoryQuantities[categoryId]!;
-      categoryGroups[categoryId]!.totalAmount += categoryAmounts[categoryId]!;
-    }
-  }
+    return ListView(
+      children: categoryGroups.entries.map((entry) {
+        final data = entry.value;
+        
+        return FutureBuilder<DocumentSnapshot>(
+          future: data.categoryId.contains('/')
+              ? FirebaseFirestore.instance.doc(data.categoryId).get()
+              : FirebaseFirestore.instance.collection('categories').doc(data.categoryId).get(),
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const ListTile(
+                leading: Icon(Icons.category),
+                title: Text('Loading...'),
+              );
+            }
 
+            String categoryName = 'Uncategorized';
+            if (snapshot.hasData && snapshot.data!.exists) {
+              categoryName = snapshot.data!.get('name') ?? 'Uncategorized';
+            }
 
-  return ListView(
-    children: categoryGroups.entries.map((entry) {
-      final data = entry.value;
-      
-      return FutureBuilder<DocumentSnapshot>(
-        future: data.categoryId.contains('/')
-            ? FirebaseFirestore.instance.doc(data.categoryId).get()
-            : FirebaseFirestore.instance.collection('categories').doc(data.categoryId).get(),
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const ListTile(
-              leading: Icon(Icons.category),
-              title: Text('Loading...'),
-            );
-          }
-
-          String categoryName = 'Uncategorized';
-          if (snapshot.hasData && snapshot.data!.exists) {
-            categoryName = snapshot.data!.get('name') ?? 'Uncategorized';
-          }
-
-          return ExpansionTile(
-            leading: const Icon(Icons.category),
-            title: Text(categoryName),
-            subtitle: Text(
-              '${data.totalQuantity} items - Total: €${data.totalAmount.toStringAsFixed(2)}',
-            ),
-            children: [
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Top products:',
-                      style: TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 8),
-                    FutureBuilder<List<Product>>(
-                      future: _getTopProductsInCategory(sales, data.categoryId),
-                      builder: (context, productSnapshot) {
-                        if (!productSnapshot.hasData) {
-                          return const Center(child: CircularProgressIndicator());
-                        }
-                        return Column(
-                          children: productSnapshot.data!.take(3).map((product) {
-                            return ListTile(
-                              contentPadding: EdgeInsets.zero,
-                              leading: product.imageUrl != null
-                                  ? Image.network(
-                                      product.imageUrl!,
-                                      width: 40,
-                                      height: 40,
-                                    )
-                                  : const Icon(Icons.shopping_bag),
-                              title: Text(product.name),
-                              subtitle: Text('€${product.price.toStringAsFixed(2)}'),
-                            );
-                          }).toList(),
-                        );
-                      },
-                    ),
-                    const SizedBox(height: 16),
-                    const Text(
-                      'Recent sales:',
-                      style: TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                    ...data.sales.take(3).map((sale) {
-                      final quantityInCategory = sale.products
-                          .where((p) => p.categoryRef.id == data.categoryId)
-                          .length;
-                      final amountInCategory = sale.products
-                          .where((p) => p.categoryRef.id == data.categoryId)
-                          .fold(0.0, (sum, p) => sum + p.price);
-                      
-                      return ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        title: Text('Sale #${sale.id.substring(0, 6)}'),
-                        subtitle: Text(
-                          DateFormat('MMM dd, HH:mm').format(sale.date),
-                        ),
-                        trailing: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text('$quantityInCategory items'),
-                            Text('€${amountInCategory.toStringAsFixed(2)}'),
-                          ],
-                        ),
-                      );
-                    }).toList(),
-                    if (data.sales.length > 3)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 8.0),
-                        child: Text(
-                          '+ ${data.sales.length - 3} more transactions',
-                          style: TextStyle(color: Colors.grey[600]),
-                        ),
-                      ),
-                  ],
-                ),
+            return ExpansionTile(
+              leading: const Icon(Icons.category),
+              title: Text(categoryName),
+              subtitle: Text(
+                '${data.totalQuantity} items - Total: €${data.totalAmount.toStringAsFixed(2)}',
               ),
-            ],
-          );
-        },
-      );
-    }).toList(),
-  );
+              children: [
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Top products:',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 8),
+                      FutureBuilder<List<Product>>(
+                        future: _getTopProductsInCategory(sales, data.categoryId),
+                        builder: (context, productSnapshot) {
+                          if (!productSnapshot.hasData) {
+                            return const Center(child: CircularProgressIndicator());
+                          }
+                          return Column(
+                            children: productSnapshot.data!.take(3).map((product) {
+                              return ListTile(
+                                contentPadding: EdgeInsets.zero,
+                                leading: product.imageUrl != null
+                                    ? Image.network(
+                                        product.imageUrl!,
+                                        width: 40,
+                                        height: 40,
+                                      )
+                                    : const Icon(Icons.shopping_bag),
+                                title: Text(product.name),
+                                subtitle: Text('€${product.price.toStringAsFixed(2)}'),
+                              );
+                            }).toList(),
+                          );
+                        },
+                      ),
+                      const SizedBox(height: 16),
+                      const Text(
+                        'Recent sales:',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      ...data.sales.take(3).map((sale) {
+                        final quantityInCategory = sale.products
+                            .where((p) => p.categoryRef.id == data.categoryId)
+                            .length;
+                        final amountInCategory = sale.products
+                            .where((p) => p.categoryRef.id == data.categoryId)
+                            .fold(0.0, (sum, p) => sum + p.price);
+                        
+                        return ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          title: Text('Sale #${sale.id.substring(0, 6)}'),
+                          subtitle: Text(
+                            DateFormat('MMM dd, HH:mm').format(sale.date),
+                          ),
+                          trailing: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text('$quantityInCategory items'),
+                              Text('€${amountInCategory.toStringAsFixed(2)}'),
+                            ],
+                          ),
+                        );
+                      }).toList(),
+                      if (data.sales.length > 3)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 8.0),
+                          child: Text(
+                            '+ ${data.sales.length - 3} more transactions',
+                            style: TextStyle(color: Colors.grey[600]),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+            );
+          },
+        );
+      }).toList(),
+    );
 
-}
-
-Future<List<Product>> _getTopProductsInCategory(List<Sale> sales, String categoryId) async {
-  final productCounts = <Product, int>{};
-  
-  for (final sale in sales) {
-    for (final product in sale.products.where((p) => p.categoryRef.id == categoryId)) {
-      productCounts[product] = (productCounts[product] ?? 0) + 1;
-    }
   }
-  
-  // Sort products by count in descending order
-  final sortedProducts = productCounts.entries.toList()
-    ..sort((a, b) => b.value.compareTo(a.value));
-  
-  return sortedProducts.map((entry) => entry.key).toList();
-}
+
+  Future<List<Product>> _getTopProductsInCategory(List<Sale> sales, String categoryId) async {
+    final productCounts = <Product, int>{};
+    
+    for (final sale in sales) {
+      for (final product in sale.products.where((p) => p.categoryRef.id == categoryId)) {
+        productCounts[product] = (productCounts[product] ?? 0) + 1;
+      }
+    }
+    
+    // Sort products by count in descending order
+    final sortedProducts = productCounts.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    
+    return sortedProducts.map((entry) => entry.key).toList();
+  }
 
   Widget _buildGroupedByDiscount(List<Sale> sales) {
     final discountGroups = <String, DiscountSalesData>{};

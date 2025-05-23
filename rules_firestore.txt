@@ -1,0 +1,149 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper functions
+    function isAdmin() {
+      return request.auth != null && 
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin";
+    }
+    
+    function isAgent() {
+      return request.auth != null && 
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "agent";
+    }
+    
+    function isCurrentUser(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+    
+    function getCurrentUser() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    // ========== Global Rules ==========
+    match /{document=**} {
+      allow read, write: if false; // Default deny all
+    }
+
+
+    // ========== Users Collection ==========
+    match /users/{userId} {
+      // Users can create their own profile
+      allow create: if request.auth != null && 
+                   request.auth.uid == userId && 
+                   request.resource.data.keys().hasOnly(['name', 'email', 'phone']);
+      
+      // Users can read/update their own profile
+      allow read, update: if isCurrentUser(userId);
+      
+      // Admins have full access
+      allow read, update: if isAdmin();
+    }
+    
+    // ========== Products Collection ==========
+    match /products/{productId} {
+      // Public read access
+      allow read: if true;
+      
+      // Only admins can modify products
+      allow create, update, delete: if isAdmin();
+    }
+    
+    // ========== Categories Collection ==========
+    match /categories/{categoryId} {
+      // Public read access
+      allow read: if true;
+      
+      // Only admins can modify categories
+      allow write: if isAdmin();
+    }
+    
+    // ========== Discounts Collection ==========
+    match /discounts/{discountId} {
+      // Public read access
+      allow read: if true;
+      
+      // Only admins can modify discounts
+      allow write: if isAdmin();
+    }
+    
+    // ========== Locations Collection ==========
+    match /locations/{locationId} {
+      // Public read access
+      allow read: if true;
+      
+      // Only admins can modify locations
+      allow write: if isAdmin();
+    }
+    
+    // ========== Sales Collection ==========
+    match /sales/{saleId} {
+      // Agents can create sales
+      allow create: if isAgent();
+
+      // Expanded read permissions
+      allow read: if 
+        // 1. Admins can read everything
+        isAdmin() || 
+        // 2. Agents can read their own sales
+        isCurrentUser(resource.data.agentId) ||
+        // 3. Allow location-based filtered queries
+        (isAgent() && 
+         request.query != null &&
+         request.query.where[0].field == 'locationId' &&
+         request.query.where[1].field == 'date' &&
+         request.query.orderBy[0].field == 'date' &&
+         request.query.where[0].value == getCurrentUser().assignedLocationId);
+
+      // Agents can only update/delete their own sales
+      allow update, delete: if isCurrentUser(resource.data.agentId);
+    }
+    
+    // ========== Stock Management Rules ==========
+    match /locations/{locationId}/stock/{productId} {
+      allow read: if request.auth != null;
+      allow write: if isAdmin() || 
+              (isAgent() && locationId == getCurrentUser().assignedLocationId);
+    }
+
+    // ========== Stock History Collection ==========
+    match /stockHistory/{historyId} {
+      // Admins can read all, agents can only read their location's history
+      allow read: if isAdmin() || 
+                  (isAgent() && 
+                   resource.data.locationId == getCurrentUser().assignedLocationId);
+      
+      // Only admins can create stock history
+      allow create: if isAdmin() || 
+                     (isAgent() && request.resource.data.locationId == getCurrentUser().assignedLocationId);
+
+    }
+    
+    // ========== Messages Collection ==========
+    match /messages/{messageId} {
+      // Participants can read messages
+      allow read: if isCurrentUser(resource.data.senderId) || 
+                   isCurrentUser(resource.data.receiverId);
+      
+      // Only sender can create messages
+      allow create: if isCurrentUser(request.resource.data.senderId);
+      
+      // Only receiver can mark as read
+      allow update: if isCurrentUser(resource.data.receiverId) && 
+                    request.resource.data.keys().hasOnly(["isRead"]);
+    }
+    
+    // ========== Notifications Collection ==========
+    match /notifications/{notificationId} {
+      // User can read their own notifications
+      allow read: if isCurrentUser(resource.data.userId);
+      
+      // Admins can create notifications
+      allow create: if isAdmin();
+      
+      // User can mark their notifications as read
+      allow update: if isCurrentUser(resource.data.userId) && 
+                    request.resource.data.keys().hasOnly(["isRead"]);
+    }
+  }
+}

@@ -10,25 +10,6 @@ import 'package:pdf/widgets.dart' as pw;
 import 'dart:io';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:file_picker/file_picker.dart';
-import 'package:flutter/foundation.dart';
-
-enum ChartType { bar, line, pie }
-
-class SalesChartData {
-  final String periodKey;
-  final String agentName;
-  final double amount;
-  final int xIndex;
-
-  SalesChartData({
-    required this.periodKey,
-    required this.agentName,
-    required this.amount,
-    required this.xIndex,
-  });
-
-  String get key => '${periodKey}_$agentName';
-}
 
 class ReportsScreen extends StatefulWidget {
   const ReportsScreen({super.key});
@@ -49,20 +30,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
   List<String> _selectedAgents = [];
   bool _selectAllAgents = true;
   Map<String, String> _agentIdToNameMap = {};
-  List<SalesChartData> _salesData = [];
-  List<BarChartGroupData> _barChartData = [];
-  ChartType _selectedChartType = ChartType.bar;
-  int _touchedPieIndex = -1;
-  final List<Color> _chartColors = [
-    Colors.blue,
-    Colors.green,
-    Colors.orange,
-    Colors.red,
-    Colors.purple,
-    Colors.teal,
-    Colors.amber,
-    Colors.deepOrange,
-  ];
+  List<BarChartGroupData> _chartData = [];
 
   @override
   void initState() {
@@ -99,37 +67,17 @@ class _ReportsScreenState extends State<ReportsScreen> {
     
     setState(() => _isLoading = true);
     try {
-      _salesData = await _getChartData();
-      _barChartData = _convertToBarChartData(_salesData);
+      final data = await _getChartData();
+      setState(() => _chartData = data);
     } catch (e) {
       _handleError('Error loading chart data: $e');
-      setState(() {
-        _salesData = [];
-        _barChartData = [];
-      });
+      setState(() => _chartData = []);
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  List<BarChartGroupData> _convertToBarChartData(List<SalesChartData> salesData) {
-    return salesData.map((data) {
-      return BarChartGroupData(
-        x: data.xIndex,
-        barRods: [
-          BarChartRodData(
-            toY: data.amount,
-            color: _getColorForIndex(data.xIndex),
-            width: 16,
-            borderRadius: BorderRadius.circular(4),
-          ),
-        ],
-        showingTooltipIndicators: [0],
-      );
-    }).toList();
-  }
-
-  Future<List<SalesChartData>> _getChartData() async {
+  Future<List<BarChartGroupData>> _getChartData() async {
     try {
       Query query = _firestore.collectionGroup('sales')
         .where('date', isGreaterThanOrEqualTo: _dateRange.start)
@@ -166,27 +114,23 @@ class _ReportsScreenState extends State<ReportsScreen> {
 
       final groupKeys = groupedData.keys.toList();
       return groupedData.entries.map((entry) {
-        final parts = entry.key.split('_');
-        return SalesChartData(
-          periodKey: parts[0],
-          agentName: parts.length > 1 ? parts[1] : 'Unknown',
-          amount: entry.value,
-          xIndex: groupKeys.indexOf(entry.key),
+        return BarChartGroupData(
+          x: groupKeys.indexOf(entry.key),
+          barRods: [
+            BarChartRodData(
+              toY: entry.value,
+              color: Colors.blue,
+              width: 16,
+              borderRadius: BorderRadius.circular(4),
+            ),
+          ],
+          showingTooltipIndicators: [0],
         );
       }).toList();
     } catch (e) {
       debugPrint('Error fetching chart data: $e');
       return [];
     }
-  }
-
-  Color _getColorForIndex(int index) {
-    return _chartColors[index % _chartColors.length];
-  }
-
-  Color _getColorForAgent(String agentName) {
-    final index = _allAgents.indexOf(agentName);
-    return index >= 0 ? _getColorForIndex(index) : Colors.grey;
   }
 
   Future<Map<String, Map<String, double>>> _getExportData() async {
@@ -243,40 +187,52 @@ class _ReportsScreenState extends State<ReportsScreen> {
   Future<Directory> _getSafeDownloadDirectory() async {
     try {
       if (Platform.isAndroid) {
-        final status = await Permission.manageExternalStorage.request();
-        if (!status.isGranted) throw Exception('Permission denied');
-        
-        final directories = await getExternalStorageDirectories(
-          type: StorageDirectory.downloads
-        );
+        // Request permission to manage external storage
+        PermissionStatus permission = await Permission.manageExternalStorage.request();
+        if (!permission.isGranted) {
+          throw Exception('Permission denied to access storage.');
+        }
+
+        // Try to access the real Downloads folder
+        final directories = await getExternalStorageDirectories(type: StorageDirectory.downloads);
         if (directories == null || directories.isEmpty) {
-          throw Exception('Downloads directory not found');
+          throw Exception('Downloads directory not found.');
         }
         return directories.first;
       } else if (Platform.isIOS) {
+        // For iOS, use the safe downloads directory
         final directory = await getDownloadsDirectory();
-        if (directory == null) throw Exception('Downloads directory not available');
+        if (directory == null) {
+          throw Exception('Downloads directory not available on iOS.');
+        }
         return directory;
+      } else {
+        // For other platforms, fallback to temporary directory
+        return await getTemporaryDirectory();
       }
-      return await getTemporaryDirectory();
     } catch (e) {
       debugPrint('Error accessing download directory: $e');
+      // If any error happens, fallback to temporary directory
       return await getTemporaryDirectory();
     }
   }
+
 
   Future<void> _exportToExcel() async {
     setState(() => _isLoading = true);
     try {
       final data = await _getExportData();
       if (data.isEmpty) {
-        _showSnackBar('No data to export');
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No data to export')),
+        );
         return;
       }
 
       final workbook = xlsio.Workbook();
       final sheet = workbook.worksheets[0];
 
+      // Write Excel content
       sheet.getRangeByName('A1').setText('Period');
       int col = 1;
       final allAgents = _selectAllAgents ? _allAgents : _selectedAgents;
@@ -314,18 +270,43 @@ class _ReportsScreenState extends State<ReportsScreen> {
       final bytes = workbook.saveAsStream();
       workbook.dispose();
 
-      final directory = await _getSafeDownloadDirectory();
+      // Ask user to pick a folder
+      String? selectedDirectory = await FilePicker.platform.getDirectoryPath();
+      if (selectedDirectory == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No folder selected')),
+        );
+        return;
+      }
+
       final fileName = 'SalesReport_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}.xlsx';
-      final file = File('${directory.path}/$fileName');
+      final file = File('$selectedDirectory/$fileName');
       await file.writeAsBytes(bytes);
+
       await OpenFile.open(file.path);
 
-      _showSnackBar('Exported to $fileName');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Exported to $fileName')),
+      );
     } catch (e) {
-      _handleError('Export failed: ${e.toString()}');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Export failed: ${e.toString()}')),
+      );
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
+  }
+
+
+
+  String _getExcelColumnName(int column) {
+    String name = '';
+    while (column > 0) {
+      column--;
+      name = '${String.fromCharCode(65 + column % 26)}$name';
+      column = column ~/ 26;
+    }
+    return name;
   }
 
   Future<void> _exportToPDF() async {
@@ -333,7 +314,9 @@ class _ReportsScreenState extends State<ReportsScreen> {
     try {
       final data = await _getExportData();
       if (data.isEmpty) {
-        _showSnackBar('No data to export');
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No data to export')),
+        );
         return;
       }
 
@@ -387,29 +370,28 @@ class _ReportsScreenState extends State<ReportsScreen> {
         ),
       );
 
+      // Save the PDF file
       final directory = await _getSafeDownloadDirectory();
       final fileName = 'SalesReport_${DateFormat('yyyyMMdd_HHmmss').format(DateTime.now())}.pdf';
       final file = File('${directory.path}/$fileName');
       await file.writeAsBytes(await pdf.save());
-      await OpenFile.open(file.path);
 
-      _showSnackBar('Exported to $fileName');
+      // Try to open the file
+      final result = await OpenFile.open(file.path);
+
+      // Notify the user
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Exported to $fileName')),
+      );
     } catch (e) {
-      _handleError('Export failed: ${e.toString()}');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Export failed: ${e.toString()}')),
+      );
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  String _getExcelColumnName(int column) {
-    String name = '';
-    while (column > 0) {
-      column--;
-      name = '${String.fromCharCode(65 + column % 26)}$name';
-      column = column ~/ 26;
-    }
-    return name;
-  }
 
   Future<void> _showAgentFilterDialog() async {
     await showDialog(
@@ -489,207 +471,6 @@ class _ReportsScreenState extends State<ReportsScreen> {
     }
   }
 
-  Widget _buildChart() {
-    return Expanded(
-      child: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : _salesData.isEmpty
-              ? const Center(child: Text('No sales data available'))
-              : _buildSelectedChart(),
-    );
-  }
-
-  Widget _buildSelectedChart() {
-    switch (_selectedChartType) {
-      case ChartType.line:
-        return _buildLineChart();
-      case ChartType.pie:
-        return _buildPieChart();
-      case ChartType.bar:
-      default:
-        return _buildBarChart();
-    }
-  }
-
-  Widget _buildBarChart() {
-    return BarChart(
-      BarChartData(
-        alignment: BarChartAlignment.spaceAround,
-        barGroups: _barChartData,
-        titlesData: FlTitlesData(
-          leftTitles: AxisTitles(
-            sideTitles: SideTitles(
-              showTitles: true,
-              getTitlesWidget: (value, meta) {
-                return Text(value.toInt().toString());
-              },
-              reservedSize: 40,
-            ),
-          ),
-          bottomTitles: AxisTitles(
-            sideTitles: SideTitles(
-              showTitles: true,
-              getTitlesWidget: (value, meta) {
-                final index = value.toInt();
-                if (index >= 0 && index < _salesData.length) {
-                  return Padding(
-                    padding: const EdgeInsets.only(top: 8.0),
-                    child: Text(
-                      _salesData[index].periodKey,
-                      style: const TextStyle(fontSize: 10),
-                    ),
-                  );
-                }
-                return const Text('');
-              },
-              reservedSize: 32,
-            ),
-          ),
-        ),
-        gridData: FlGridData(show: true),
-        borderData: FlBorderData(show: false),
-        barTouchData: BarTouchData(
-          enabled: true,
-          touchTooltipData: BarTouchTooltipData(
-            getTooltipColor: (group) => Colors.blueGrey,
-            getTooltipItem: (group, groupIndex, rod, rodIndex) {
-              final data = _salesData[groupIndex];
-              return BarTooltipItem(
-                '${data.periodKey}\n${data.agentName}\n',
-                const TextStyle(color: Colors.white),
-                children: [
-                  TextSpan(
-                    text: '\$${rod.toY.toStringAsFixed(2)}',
-                    style: const TextStyle(
-                      color: Colors.yellow,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ],
-              );
-            },
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildLineChart() {
-    return LineChart(
-      LineChartData(
-        lineBarsData: [
-          LineChartBarData(
-            spots: _salesData.asMap().entries.map((e) {
-              return FlSpot(e.key.toDouble(), e.value.amount);
-            }).toList(),
-            isCurved: true,
-            color: Colors.blue,
-            barWidth: 4,
-            belowBarData: BarAreaData(show: false),
-            dotData: FlDotData(show: true),
-          ),
-        ],
-        titlesData: FlTitlesData(
-          leftTitles: AxisTitles(
-            sideTitles: SideTitles(
-              showTitles: true,
-              getTitlesWidget: (value, meta) {
-                return Text(value.toInt().toString());
-              },
-              reservedSize: 40,
-            ),
-          ),
-          bottomTitles: AxisTitles(
-            sideTitles: SideTitles(
-              showTitles: true,
-              getTitlesWidget: (value, meta) {
-                final index = value.toInt();
-                if (index >= 0 && index < _salesData.length) {
-                  return Padding(
-                    padding: const EdgeInsets.only(top: 8.0),
-                    child: Text(
-                      _salesData[index].periodKey,
-                      style: const TextStyle(fontSize: 10),
-                    ),
-                  );
-                }
-                return const Text('');
-              },
-              reservedSize: 32,
-            ),
-          ),
-        ),
-        gridData: FlGridData(show: true),
-        borderData: FlBorderData(show: true),
-      ),
-    );
-  }
-
-  Widget _buildPieChart() {
-    final Map<String, double> agentTotals = {};
-    for (final data in _salesData) {
-      agentTotals.update(
-        data.agentName,
-        (value) => value + data.amount,
-        ifAbsent: () => data.amount,
-      );
-    }
-
-    final List<PieChartSectionData> pieSections = agentTotals.entries.map((e) {
-      final isTouched = _touchedPieIndex == agentTotals.keys.toList().indexOf(e.key);
-      return PieChartSectionData(
-        color: _getColorForAgent(e.key),
-        value: e.value,
-        title: '${e.value.toStringAsFixed(0)}\n${e.key}',
-        radius: isTouched ? 60 : 50,
-        titleStyle: TextStyle(
-          fontSize: isTouched ? 16 : 14,
-          fontWeight: FontWeight.bold,
-          color: Colors.white,
-        ),
-      );
-    }).toList();
-
-    return PieChart(
-      PieChartData(
-        pieTouchData: PieTouchData(
-          touchCallback: (FlTouchEvent event, pieTouchResponse) {
-            setState(() {
-              if (!event.isInterestedForInteractions ||
-                  pieTouchResponse == null ||
-                  pieTouchResponse.touchedSection == null) {
-                _touchedPieIndex = -1;
-                return;
-              }
-              _touchedPieIndex = pieTouchResponse.touchedSection!.touchedSectionIndex;
-            });
-          },
-        ),
-        borderData: FlBorderData(show: false),
-        sectionsSpace: 0,
-        centerSpaceRadius: 60,
-        sections: pieSections,
-      ),
-    );
-  }
-
-  void _handleError(String message) {
-    debugPrint(message);
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(message)),
-      );
-    }
-  }
-
-  void _showSnackBar(String message) {
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(message)),
-      );
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -713,36 +494,9 @@ class _ReportsScreenState extends State<ReportsScreen> {
               _loadChartData();
             },
             itemBuilder: (context) => [
-              const PopupMenuItem<String>(
-                value: 'day',
-                child: Text('Daily'),
-              ),
-              const PopupMenuItem<String>(
-                value: 'week',
-                child: Text('Weekly'),
-              ),
-              const PopupMenuItem<String>(
-                value: 'month',
-                child: Text('Monthly'),
-              ),
-            ],
-          ),
-          PopupMenuButton<ChartType>(
-            icon: const Icon(Icons.show_chart),
-            onSelected: (type) => setState(() => _selectedChartType = type),
-            itemBuilder: (context) => [
-              const PopupMenuItem<ChartType>(
-                value: ChartType.bar,
-                child: Text('Bar Chart'),
-              ),
-              const PopupMenuItem<ChartType>(
-                value: ChartType.line,
-                child: Text('Line Chart'),
-              ),
-              const PopupMenuItem<ChartType>(
-                value: ChartType.pie,
-                child: Text('Pie Chart'),
-              ),
+              const PopupMenuItem(value: 'day', child: Text('Daily')),
+              const PopupMenuItem(value: 'week', child: Text('Weekly')),
+              const PopupMenuItem(value: 'month', child: Text('Monthly')),
             ],
           ),
           PopupMenuButton<String>(
@@ -752,37 +506,108 @@ class _ReportsScreenState extends State<ReportsScreen> {
               if (value == 'pdf') _exportToPDF();
             },
             itemBuilder: (context) => [
-              const PopupMenuItem<String>(
-                value: 'excel',
-                child: Text('Export to Excel'),
-              ),
-              const PopupMenuItem<String>(
-                value: 'pdf',
-                child: Text('Export to PDF'),
-              ),
+              const PopupMenuItem(value: 'excel', child: Text('Export to Excel')),
+              const PopupMenuItem(value: 'pdf', child: Text('Export to PDF')),
             ],
           ),
         ],
       ),
-      body: Column(
-        children: [
-          Text(
-            'Sales Report: ${DateFormat('MMM dd, yyyy').format(_dateRange.start)} - '
-            '${DateFormat('MMM dd, yyyy').format(_dateRange.end)}',
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
-          if (!_selectAllAgents)
-            Padding(
-              padding: const EdgeInsets.only(top: 8.0),
-              child: Text(
-                'Agents: ${_selectedAgents.join(', ')}',
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-            ),
-          const SizedBox(height: 16),
-          _buildChart(),
-        ],
-      ),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : _chartData.isEmpty
+              ? const Center(child: Text('No sales data available'))
+              : Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    children: [
+                      Text(
+                        'Sales Report: ${DateFormat('MMM dd, yyyy').format(_dateRange.start)} - '
+                        '${DateFormat('MMM dd, yyyy').format(_dateRange.end)}',
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                      if (!_selectAllAgents)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 8.0),
+                          child: Text(
+                            'Agents: ${_selectedAgents.join(', ')}',
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                        ),
+                      const SizedBox(height: 16),
+                      Expanded(
+                        child: BarChart(
+                          BarChartData(
+                            alignment: BarChartAlignment.spaceAround,
+                            barGroups: _chartData,
+                            titlesData: FlTitlesData(
+                              leftTitles: AxisTitles(
+                                sideTitles: SideTitles(
+                                  showTitles: true,
+                                  getTitlesWidget: (value, meta) {
+                                    return Text(value.toInt().toString());
+                                  },
+                                  reservedSize: 40,
+                                ),
+                              ),
+                              bottomTitles: AxisTitles(
+                                sideTitles: SideTitles(
+                                  showTitles: true,
+                                  getTitlesWidget: (value, meta) {
+                                    final index = value.toInt();
+                                    if (index >= 0 && index < _chartData.length) {
+                                      final date = _dateRange.start.add(Duration(days: index));
+                                      return Padding(
+                                        padding: const EdgeInsets.only(top: 8.0),
+                                        child: Text(
+                                          _getPeriodKey(date),
+                                          style: const TextStyle(fontSize: 10),
+                                        ),
+                                      );
+                                    }
+                                    return const Text('');
+                                  },
+                                  reservedSize: 32,
+                                ),
+                              ),
+                            ),
+                            gridData: FlGridData(show: true),
+                            borderData: FlBorderData(show: false),
+                            barTouchData: BarTouchData(
+                              enabled: true,
+                              touchTooltipData: BarTouchTooltipData(
+                                getTooltipColor: (BarChartGroupData group) => Colors.blueGrey,
+                                getTooltipItem: (group, groupIndex, rod, rodIndex) {
+                                  final date = _dateRange.start.add(Duration(days: groupIndex));
+                                  return BarTooltipItem(
+                                    '${_getPeriodKey(date)}\n',
+                                    const TextStyle(color: Colors.white),
+                                    children: [
+                                      TextSpan(
+                                        text: '€${rod.toY.toStringAsFixed(2)}',
+                                        style: const TextStyle(
+                                          color: Colors.yellow,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ],
+                                  );
+                                },
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
     );
+  }
+    void _handleError(String message) {
+    debugPrint(message);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message)),
+      );
+    }
   }
 }
